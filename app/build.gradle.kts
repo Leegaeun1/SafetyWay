@@ -12,7 +12,7 @@ android {
     defaultConfig {
         applicationId = "com.example.safetyway"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 33
         versionCode = 1
         versionName = "1.0"
 
@@ -37,6 +37,13 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+    packaging {
+        jniLibs {
+            // 이 설정을 추가하면 라이브러리를 압축하지 않고 설치합니다.
+            // 16 KB 정렬 문제를 우회하는 데 도움이 됩니다.
+            useLegacyPackaging = true
+        }
     }
 }
 
