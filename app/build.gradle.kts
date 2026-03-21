@@ -38,6 +38,13 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    packaging {
+        jniLibs {
+            // 이 설정을 추가하면 라이브러리를 압축하지 않고 설치합니다.
+            // 16 KB 정렬 문제를 우회하는 데 도움이 됩니다.
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {
@@ -61,7 +68,15 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomversion")
     implementation("androidx.room:room-ktx:$roomversion")
     ksp("androidx.room:room-compiler:$roomversion")
-    implementation("com.naver.maps:map-sdk:3.17.0")
+    // 1. ConstraintLayout 부품 추가
+    implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+
+    // 2. Fragment 부품 추가 (MapFragment를 쓰기 위해 필수!)
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
+
+    // 네이버 지도 SDK가 있는지 다시 한 번 확인!
+    implementation("com.naver.maps:map-sdk:3.23.1")
+
     implementation("com.github.doyaaaaaken:kotlin-csv-jvm:1.9.2")
 
 }
