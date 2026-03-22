@@ -78,5 +78,6 @@ dependencies {
     implementation("com.naver.maps:map-sdk:3.23.1")
 
     implementation("com.github.doyaaaaaken:kotlin-csv-jvm:1.9.2")
+    implementation("com.google.android.gms:play-services-location:21.0.1")
 
 }
