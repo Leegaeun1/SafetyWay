@@ -79,5 +79,8 @@ dependencies {
 
     implementation("com.github.doyaaaaaken:kotlin-csv-jvm:1.9.2")
     implementation("com.google.android.gms:play-services-location:21.0.1")
+    implementation("androidx.cardview:cardview:1.0.0")
+
+    implementation("com.google.android.material:material:1.11.0")
 
 }
