@@ -1,14 +1,13 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp") version "2.0.21-1.0.28"
-    alias(libs.plugins.kotlin.android)
 }
 
 android {
     namespace = "com.example.safetyway"
     compileSdk = 35
-
     defaultConfig {
         applicationId = "com.example.safetyway"
         minSdk = 24
@@ -78,5 +77,8 @@ dependencies {
     implementation("com.naver.maps:map-sdk:3.23.1")
 
     implementation("com.github.doyaaaaaken:kotlin-csv-jvm:1.9.2")
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+    implementation("androidx.cardview:cardview:1.0.0")
+    implementation("com.google.android.material:material:1.11.0")
 
 }

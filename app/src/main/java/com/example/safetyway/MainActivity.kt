@@ -2,52 +2,28 @@ package com.example.safetyway
 
 
 
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import com.naver.maps.map.LocationTrackingMode
 import com.naver.maps.map.MapFragment
 import com.naver.maps.map.NaverMap
 import com.naver.maps.map.OnMapReadyCallback
-import java.security.MessageDigest
+import com.naver.maps.map.util.FusedLocationSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
+    private lateinit var locationSource: FusedLocationSource
+    private lateinit var naverMap: NaverMap
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        try {
-            val packageName = packageName
-            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-            } else {
-                @Suppress("DEPRECATION")
-                packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
-            }
+        setContentView(R.layout.activity_main) // 해당 xml을 보여줌
 
-            // 버전별로 다른 서명 정보를 안전하게 가져옵니다
-            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                packageInfo.signingInfo?.apkContentsSigners
-            } else {
-                @Suppress("DEPRECATION")
-                packageInfo.signatures
-            }
-
-            // null 체크(?.)를 해서 'Non-nullable' 에러를 방지합니다
-            signatures?.forEach { signature ->
-                val md = MessageDigest.getInstance("SHA-1")
-                md.update(signature.toByteArray())
-                val bytes = md.digest()
-                val sha1 = bytes.joinToString(":") { String.format("%02X", it) }
-
-                // Logcat에서 이 태그로 검색하세요!
-                Log.d("FINAL_SHA1", "가은님의 SHA-1: $sha1")
-            }
-        } catch (e: Exception) {
-            Log.e("FINAL_SHA1", "에러 발생: ${e.message}")
-        }
         // 1. 레이아웃에서 지도 프래그먼트를 찾아옵니다.
         val fm = supportFragmentManager
         val mapFragment = fm.findFragmentById(R.id.map_fragment) as MapFragment?
@@ -57,12 +33,55 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
         // 2. 지도가 준비되면 onMapReady를 호출하도록 설정합니다.
         mapFragment.getMapAsync(this)
-    }
+        locationSource = FusedLocationSource(
+            this,
+            LOCATION_PERMISSION_REQUEST_CODE
+        )
+        // 코루틴을 사용하여 백그라운드에서 DB 읽기
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                val db = AppDatabase.getDatabase(applicationContext)
+                val dao = db.cctvDao()
 
+                // 테스트: 데이터가 총 몇 개인지, 첫 번째 데이터는 무엇인지 로그로 확인
+                val allData = dao.getAllCctvs()
+                Log.d("DB_TEST", "총 CCTV 개수: ${allData.size}")
+
+                if (allData.isNotEmpty()) {
+                    Log.d("DB_TEST", "첫번째 CCTV 정보 - 위도: ${allData[0].latitude}, 경도: ${allData[0].longitude}, 대수: ${allData[0].cameraCount}")
+                }
+            }
+        }
+    }
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        if (
+            locationSource.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults
+            )
+        ) {
+            if (!locationSource.isActivated) { // 권한 거부됨
+                naverMap.locationTrackingMode = LocationTrackingMode.None
+            }
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
     // 3. 지도가 준비되었을 때 실행되는 함수입니다.
     override fun onMapReady(naverMap: NaverMap) {
-        // 여기서부터 지도 위에 마커를 찍거나 경로를 그리는 코드를 작성합니다!
-        // 예: 지도 유형을 위성 지도로 바꾸기
-        // naverMap.mapType = NaverMap.MapType.Satellite
+        this.naverMap = naverMap
+        naverMap.locationSource = locationSource
+        val uiSettings = naverMap.uiSettings
+        uiSettings.isLocationButtonEnabled = true
+        naverMap.locationTrackingMode = LocationTrackingMode.Follow
+
+    }
+    companion object {
+        private const val LOCATION_PERMISSION_REQUEST_CODE = 1000
     }
 }
