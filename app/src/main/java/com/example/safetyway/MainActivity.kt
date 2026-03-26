@@ -3,12 +3,17 @@ package com.example.safetyway
 
 
 import android.os.Bundle
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.naver.maps.map.LocationTrackingMode
 import com.naver.maps.map.MapFragment
 import com.naver.maps.map.NaverMap
 import com.naver.maps.map.OnMapReadyCallback
 import com.naver.maps.map.util.FusedLocationSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
@@ -32,6 +37,21 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             this,
             LOCATION_PERMISSION_REQUEST_CODE
         )
+        // 코루틴을 사용하여 백그라운드에서 DB 읽기
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                val db = AppDatabase.getDatabase(applicationContext)
+                val dao = db.cctvDao()
+
+                // 테스트: 데이터가 총 몇 개인지, 첫 번째 데이터는 무엇인지 로그로 확인
+                val allData = dao.getAllCctvs()
+                Log.d("DB_TEST", "총 CCTV 개수: ${allData.size}")
+
+                if (allData.isNotEmpty()) {
+                    Log.d("DB_TEST", "첫번째 CCTV 정보 - 위도: ${allData[0].latitude}, 경도: ${allData[0].longitude}, 대수: ${allData[0].cameraCount}")
+                }
+            }
+        }
     }
     override fun onRequestPermissionsResult(
         requestCode: Int,

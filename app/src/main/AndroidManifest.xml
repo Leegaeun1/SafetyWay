@@ -17,7 +17,7 @@
         android:theme="@style/Theme.SafetyWay">
         <meta-data
             android:name="com.naver.maps.map.NCP_KEY_ID"
-            android:value="fdn8q97jb4" />
+            android:value="@string/NAVER_MAP_CLIENT_ID" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

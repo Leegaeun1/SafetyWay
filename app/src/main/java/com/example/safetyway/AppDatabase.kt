@@ -5,26 +5,24 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-// 1. 사용할 Entity들을 리스트로 넣고, 데이터베이스 버전을 지정합니다.
-@Database(entities = [CctvEntity::class], version = 1)
+@Database(entities = [CctvEntity::class], version = 1, exportSchema = false) // 어떤 엔티티 사용? 버전 몇?
 abstract class AppDatabase : RoomDatabase() {
-
-    // 2. Dao를 가져올 수 있는 추상 함수를 선언합니다.
     abstract fun cctvDao(): CctvDao
 
-    companion object {
-        // 3. 앱 전체에서 공유할 단 하나의 데이터베이스 인스턴스 (싱글톤)
+    companion object { // 싱글톤 패턴
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
         fun getDatabase(context: Context): AppDatabase {
-            // 인스턴스가 이미 있으면 그것을 반환하고, 없으면 새로 만듭니다.
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "safety_way_db" // 생성될 데이터베이스 파일 이름
-                ).build()
+                    "cctv_database" // 앱 내부에 저장될 실제 DB 이름
+                )
+                    .createFromAsset("cctv_data.db") // assets의 DB 파일을 복사해서 가져옴
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }
