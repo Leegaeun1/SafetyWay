@@ -1,15 +1,14 @@
 package com.example.safetyway
-// 앱에 탑재된 실제 DB를 대변.
 import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [CctvEntity::class], version = 1, exportSchema = false) // 어떤 엔티티 사용? 버전 몇?
+@Database(entities = [SafetyEntity::class], version = 1, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
-    abstract fun cctvDao(): CctvDao
+    abstract fun safetyDao(): SafetyDao
 
-    companion object { // 싱글톤 패턴
+    companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -18,9 +17,9 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "cctv_database" // 앱 내부에 저장될 실제 DB 이름
+                    "safety_way_db"
                 )
-                    .createFromAsset("cctv_data.db") // assets의 DB 파일을 복사해서 가져옴
+                    .createFromAsset("jinju_safety_data.db")
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
