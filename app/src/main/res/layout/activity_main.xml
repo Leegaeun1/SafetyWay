@@ -102,7 +102,9 @@
                     android:hint="출발지"
                     android:background="@null"
                     android:singleLine="true"
-                    android:textSize="15sp"/>
+                    android:textSize="15sp"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"/>
             </LinearLayout>
 
             <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#EEEEEE"/>
@@ -126,7 +128,9 @@
                     android:hint="목적지"
                     android:background="@null"
                     android:singleLine="true"
-                    android:textSize="15sp"/>
+                    android:textSize="15sp"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"/>
             </LinearLayout>
         </LinearLayout>
     </androidx.cardview.widget.CardView>
