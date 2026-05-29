@@ -1,10 +1,10 @@
 package com.example.safetyway
 
-import android.app.Activity
-import android.content.Intent
+import android.app.Activity // 다른 화면에서 결과 받아올 때 필요
+import android.content.Intent // 화면 전환시 필요
 import android.graphics.Color
-import android.os.Bundle
-import android.view.View
+import android.os.Bundle // 화면 생성될 때 이전 상태 데이터 넘겨받는 묶음
+import android.view.View // UI요소들
 import android.widget.Button
 import android.widget.EditText
 import android.widget.HorizontalScrollView
@@ -13,8 +13,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
-import androidx.lifecycle.lifecycleScope
-import com.naver.maps.geometry.LatLng
+import androidx.lifecycle.lifecycleScope // Activity 생명주기에 묶인 코루틴 스코프. 화면이 꺼지면 자동으로 코루틴도 취소됨
+import com.naver.maps.geometry.LatLng // 네이버지도의 위경도 좌표 클래스.
 import com.naver.maps.map.LocationTrackingMode
 import com.naver.maps.map.MapFragment
 import com.naver.maps.map.NaverMap
@@ -22,80 +22,79 @@ import com.naver.maps.map.OnMapReadyCallback
 import com.naver.maps.map.overlay.Marker
 import com.naver.maps.map.overlay.OverlayImage
 import com.naver.maps.map.overlay.PolylineOverlay
-import com.naver.maps.map.util.FusedLocationSource
+import com.naver.maps.map.util.FusedLocationSource // 더 정확한 위치를 뽑아주는 위치 소스!
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
-
     private lateinit var locationSource: FusedLocationSource
     private lateinit var naverMap: NaverMap
-    private var isCctvVisible = false
-    private var isLightVisible = false
-    private val activeCctvMarkers = mutableListOf<Marker>()
-    private val activeLightMarkers = mutableListOf<Marker>()
-    private val MIN_ZOOM_LEVEL = 14.0
+    private var isCctvVisible = false // CCTV가 보이는 상태인가
+    private var isLightVisible = false // 보안등이 보이는 상태인가
+    private val activeCctvMarkers = mutableListOf<Marker>() // 현재 지도에 표시중인 CCTV 마커들 담아두는 목록임. 나중에 한번에 지우기위함
+    private val activeLightMarkers = mutableListOf<Marker>() // 위와 같이 보안등 담아두는 목록.
+    private val MIN_ZOOM_LEVEL = 14.0 // 줌 레벨이 이것보다 낮으면 마커를 표시하지 X
 
-    private lateinit var searchApi: NaverSearchApi
-    private lateinit var mapApi: NaverMapApi
-    private lateinit var safeRouteManager: SafeRouteManager
+    private lateinit var searchApi: NaverSearchApi // 장소 검색 api
+    private lateinit var mapApi: NaverMapApi // 지도 api
+    private lateinit var safeRouteManager: SafeRouteManager // 안전경로 계산용
 
-    private val polylines = mutableListOf<PolylineOverlay>()
-    private var goalLatLng: LatLng? = null
-    private var startLatLng: LatLng? = null  // null = 현재위치 사용
-    private var selectedRouteIndex = 0
-    private var routeResults = listOf<RouteResult>()
+    private val polylines = mutableListOf<PolylineOverlay>() // 지도에 그린 경로 선들을 보관하는 목록. 경로 초기화할 때 전부 지울 수 있도록
+    private var goalLatLng: LatLng? = null // 목적지 좌표. null이면 아직 선택안한것.
+    private var startLatLng: LatLng? = null  // 출발지 좌표. null = 현재위치 사용
+    private var selectedRouteIndex = 0 // 3개 경로 중 몇 번째가 선택되었는지?
+    private var routeResults = listOf<RouteResult>() // 경로 결과 목록.
 
-    private var lastKnownLocation: LatLng? = null
-    private var cachedCity: String? = null
-    private var cachedDong: String? = null
-    private var pendingTarget: String = "goal"
-    private lateinit var fusedClient: com.google.android.gms.location.FusedLocationProviderClient
-    private var locationCallback: com.google.android.gms.location.LocationCallback? = null
-    data class RouteResult(
-        val path: List<List<Double>>,
-        val distanceM: Int,
-        val durationSec: Int,
-        val cctvCount: Int,
-        val lightCount: Int,
-        val safetyScore: Int
+    private var lastKnownLocation: LatLng? = null // 마지막으로 알고있는 GPS위치.
+    private var cachedCity: String? = null // 역 지오코딩으로 얻은 시 이름
+    private var cachedDong: String? = null // 역 지오코딩으로 얻은 동 이름
+    private var pendingTarget: String = "goal" // 검색창을 열었을 때 출발지인지 목적지 검색인지 기억!
+    private lateinit var fusedClient: com.google.android.gms.location.FusedLocationProviderClient // GPS 업데이트를 요청/취소하는 클라이언트
+    private var locationCallback: com.google.android.gms.location.LocationCallback? = null // 위치 업데이트 콜백 객체
+    data class RouteResult( // 경로 하나를 표현하는 데이터 클래스. 
+        val path: List<List<Double>>, // 좌표 목록
+        val distanceM: Int, // 거리(미터)
+        val durationSec: Int, // 시간(초)
+        val cctvCount: Int, // cctv 수
+        val lightCount: Int, // 보안등 수
+        val safetyScore: Int // 안전점수
     )
 
+    /**앱이 시작됐을 때 네이버 지도, 검색 API, 경로 매니저 세팅
+     * startLocationUpdates()로 GPS위치를 즉시 가져옴.*/
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        locationSource = FusedLocationSource(this, LOCATION_PERMISSION_REQUEST_CODE)
-        searchApi = RetrofitClient.createSearchApi(this)
-        mapApi    = RetrofitClient.createMapApi(this)
-        safeRouteManager = SafeRouteManager(
+        locationSource = FusedLocationSource(this, LOCATION_PERMISSION_REQUEST_CODE) // 위치 소스 초기화.
+        searchApi = RetrofitClient.createSearchApi(this) // retrofit으로 네이버 검색 api 인스턴스 생성
+        mapApi    = RetrofitClient.createMapApi(this) // retrofit으로 네이버 지도 api 인스턴트 생성
+        safeRouteManager = SafeRouteManager( // 로컬 DB와 지도 API를 주입해서 SafeRouteManager 생성!!
             safetyDao = AppDatabase.getDatabase(this).safetyDao(),
             mapApi    = mapApi
         )
-        fusedClient = com.google.android.gms.location.LocationServices
+        fusedClient = com.google.android.gms.location.LocationServices // 초기화. GPS 업데이트 요청에 씀
             .getFusedLocationProviderClient(this)
 
         val fm = supportFragmentManager
-        val mapFragment = fm.findFragmentById(R.id.map_fragment) as MapFragment?
+        val mapFragment = fm.findFragmentById(R.id.map_fragment) as MapFragment? // 화면에서 지도 Fragment를 찾거나 없으면 새로 만들어 붙임.
             ?: MapFragment.newInstance().also {
                 fm.beginTransaction().add(R.id.map_fragment, it).commit()
             }
-        mapFragment.getMapAsync(this)
-
-        startLocationUpdates()
-
-        setupMainSearchCard()
-        setupRouteInputCard()
+        mapFragment.getMapAsync(this) // 지도가 준비되면 onMapReady를 호출함.
+        startLocationUpdates() // GPS 업데이트 시작
+        setupMainSearchCard() // 메인 검색 카드 설정
+        setupRouteInputCard() // 경로 입력 카드 설정
     }
-    @android.annotation.SuppressLint("MissingPermission")
-    private fun startLocationUpdates() {
-        val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
+    @android.annotation.SuppressLint("MissingPermission") // 경고 무시
+    private fun startLocationUpdates() { // GPS 업데이트.
+        val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission( // 위치 권한 없으면 함수 종료!
             this, android.Manifest.permission.ACCESS_FINE_LOCATION
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (!hasPerm) return
 
-        val req = com.google.android.gms.location.LocationRequest.Builder(
+        val req = com.google.android.gms.location.LocationRequest.Builder( // 5초마다 위치요청, 최대 10번만 받음!
             com.google.android.gms.location.Priority.PRIORITY_BALANCED_POWER_ACCURACY, 5000L
         ).setMaxUpdates(10).build()
 
@@ -104,38 +103,36 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 result: com.google.android.gms.location.LocationResult
             ) {
                 val loc = result.lastLocation ?: return
-                lastKnownLocation = LatLng(loc.latitude, loc.longitude)
+                lastKnownLocation = LatLng(loc.latitude, loc.longitude) // 위치 업데이트될때마다 갱신됨!
 
                 if (cachedCity != null) return  // 이미 지역명 있으면 스킵
 
-                lifecycleScope.launch(Dispatchers.IO) {
+                lifecycleScope.launch(Dispatchers.IO) { // 지역 없으면 역 지오코딩해서 저장! IO 스레드에서 API 호출 후  Main 스레드에 저장!
                     runCatching {
                         val rg = mapApi.reverseGeocode("${loc.longitude},${loc.latitude}")
                         val region = rg.results?.firstOrNull()?.region
                         withContext(Dispatchers.Main) {
-                            cachedCity = region?.area2?.name
-                            cachedDong = region?.area3?.name
-                            android.util.Log.d("SafetyWay",
-                                "MainActivity city=$cachedCity, dong=$cachedDong")
+                            cachedCity = region?.area2?.name // 시 이름
+                            cachedDong = region?.area3?.name // 동 이름
                         }
                     }
                 }
             }
         }
 
-        fusedClient.requestLocationUpdates(req, locationCallback!!, mainLooper)
+        fusedClient.requestLocationUpdates(req, locationCallback!!, mainLooper) // 실제로 GPS 업데이트 시작! 메인스레드에서 받음.
     }
-    override fun onDestroy() {
+    override fun onDestroy() { // 화면 종료
         super.onDestroy()
-        locationCallback?.let { fusedClient.removeLocationUpdates(it) }
+        locationCallback?.let { fusedClient.removeLocationUpdates(it) } // GPS 업데이트 구독해제. 안하면 메모리 누수 + 배터리 낭비!
     }
     // SearchActivity 결과 처리
-    private val searchLauncher = registerForActivityResult(
+    private val searchLauncher = registerForActivityResult( // SearchActivity를 열고 결과를 돌려받음.
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
-        val data = result.data ?: return@registerForActivityResult
-        val name = data.getStringExtra(SearchActivity.RESULT_NAME) ?: return@registerForActivityResult
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult // 검색을 취소하거나 실패하면 무시함(아무것도 선택X)
+        val data = result.data ?: return@registerForActivityResult // return@register~ 이건 이 람다를 빠져나가라는 뜻임.
+        val name = data.getStringExtra(SearchActivity.RESULT_NAME) ?: return@registerForActivityResult // 각각 SearchActivity가 넘겨준 장소명, 위도, 경도 꺼냄
         val lat  = data.getDoubleExtra(SearchActivity.RESULT_LAT, 0.0)
         val lng  = data.getDoubleExtra(SearchActivity.RESULT_LNG, 0.0)
         if (lat == 0.0) return@registerForActivityResult
@@ -144,13 +141,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         showRouteInputCard()
 
         when (pendingTarget) {
-            "goal" -> {
+            "goal" -> { // 목적지 검색임 
                 findViewById<EditText>(R.id.goal_input).setText(name)
                 goalLatLng = LatLng(lat, lng)
                 // 출발지도 이미 설정되어 있으면 바로 경로탐색
                 if (startLatLng != null || lastKnownLocation != null) findRoutes()
             }
-            "start" -> {
+            "start" -> { // 출발지 검색임
                 findViewById<EditText>(R.id.start_input).setText(name)
                 startLatLng = LatLng(lat, lng)
                 // 목적지도 이미 설정되어 있으면 바로 경로탐색
@@ -213,31 +210,31 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     // 경로 탐색
-    private fun findRoutes() {
+    private fun findRoutes() { // 경로 탐색
         val goal = goalLatLng ?: return
 
         // 출발지: 직접 선택했으면 그것, 아니면 현재위치
         val start = startLatLng
-            ?: lastKnownLocation
-            ?: naverMap.locationOverlay.position.takeIf { it.latitude != 0.0 }
+            ?: lastKnownLocation // GPS 위치
+            ?: naverMap.locationOverlay.position.takeIf { it.latitude != 0.0 } // 지도 위치 오버레이.
 
         if (start == null || start.latitude == 0.0) {
             Toast.makeText(this, "현재 위치를 확인 중입니다", Toast.LENGTH_SHORT).show()
             return
         }
-        clearPolylines()
+        clearPolylines() // 그려진거 초기화
 
         lifecycleScope.launch {
             try {
                 val scored = withContext(Dispatchers.IO) {
-                    safeRouteManager.findThreeRoutes(start, goal)
+                    safeRouteManager.findThreeRoutes(start, goal) // 3개 경로를 안전점수와 함께 계산함.
                 }
-                if (scored.isEmpty()) {
+                if (scored.isEmpty()) { // 안전점수가 없을때
                     Toast.makeText(this@MainActivity, "경로를 찾을 수 없습니다", Toast.LENGTH_SHORT).show()
                     return@launch
                 }
 
-                val results = scored.map { sr ->
+                val results = scored.map { sr -> // 결과를 MainActivity의 RouteResult형식으로 반환.
                     RouteResult(
                         path = sr.path,
                         distanceM = sr.distanceM,
@@ -248,21 +245,21 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                     )
                 }
 
-                results.forEachIndexed { i, route ->
+                results.forEachIndexed { i, route -> // 첫번째 경로만 초록으로 굵게, 나머지는 회색 가늘게 그림.
                     drawPolyline(
                         path  = route.path,
                         color = if (i == 0) ROUTE_COLORS[0] else ROUTE_GRAY,
                         width = if (i == 0) 15 else 8
                     )
                 }
-                showRouteCards(results)
+                showRouteCards(results) // 경로 카드를 보여줌.
             } catch (e: Exception) {
                 Toast.makeText(this@MainActivity, "경로 탐색 실패: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private val ROUTE_COLORS = listOf(
+    private val ROUTE_COLORS = listOf( // 각각 다른 색상
         Color.parseColor("#2ECC71"),
         Color.parseColor("#F1C40F"),
         Color.parseColor("#3D6BF5")
@@ -287,7 +284,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         val scoreIds = listOf(R.id.score_1, R.id.score_2, R.id.score_3)
 
         fun applySelection(selected: Int) {
-            cardIds.forEachIndexed { i, cardId ->
+            cardIds.forEachIndexed { i, cardId ->// 선택된 카드는 컬러배경
                 val isSelected = i == selected
                 val routeColor = ROUTE_COLORS.getOrElse(i) { Color.parseColor("#3D6BF5") }
                 val bgColor   = if (isSelected) routeColor else Color.WHITE
@@ -303,7 +300,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 }
                 findViewById<TextView>(scoreIds[i]).setTextColor(mainColor)
 
-                if (i < polylines.size) {
+                if (i < polylines.size) { // 지도에서 굵은선.
                     polylines[i].width = if (isSelected) 15 else 8
                     polylines[i].color = if (isSelected) routeColor else ROUTE_GRAY
                 }
@@ -312,8 +309,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
         routes.forEachIndexed { i, route ->
             if (i >= 3) return@forEachIndexed
-            val walkingMinutes = (route.distanceM / 65.0).toInt().coerceAtLeast(1)
-            val steps = (route.distanceM * 1.4).toInt()
+            val walkingMinutes = (route.distanceM / 65.0).toInt().coerceAtLeast(1) // 거리/65m = 도보시간.
+            val steps = (route.distanceM * 1.4).toInt() // 거리 x1.4 = 걸음 수
             val km    = "%.1f".format(route.distanceM / 1000.0)
             val label = when (i) {
                 0    -> "🛡 안전 추천"
@@ -338,12 +335,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         naviBtn.setOnClickListener { startNaverMapNavi() }
     }
 
-    private fun startNaverMapNavi() {
+    private fun startNaverMapNavi() { // 네비게이션 시작
         val goal = goalLatLng ?: return
         val selectedRoute = routeResults.getOrNull(selectedRouteIndex) ?: return
 
-        val lats = selectedRoute.path.map { it[1] }.toDoubleArray()
-        val lngs = selectedRoute.path.map { it[0] }.toDoubleArray()
+        val lats = selectedRoute.path.map { it[1] }.toDoubleArray() // 위도 배열
+        val lngs = selectedRoute.path.map { it[0] }.toDoubleArray() // 경도 배열 분리!
 
         val intent = Intent(this, NavigationActivity::class.java).apply {
             putExtra(NavigationActivity.EXTRA_PATH_LAT, lats)
@@ -353,7 +350,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             putExtra(NavigationActivity.EXTRA_GOAL_NAME,
                 findViewById<EditText>(R.id.goal_input).text.toString())
             putExtra(NavigationActivity.EXTRA_TOTAL_DISTANCE, selectedRoute.distanceM.toDouble())
-        }
+        }// NavigationActivity로 경로 데이터를 Intent에 담아 전달하고 화면 전환.
         startActivity(intent)
     }
 
@@ -386,12 +383,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     // 지도 준비
     override fun onMapReady(naverMap: NaverMap) {
         this.naverMap = naverMap
-        naverMap.locationSource = locationSource
-        naverMap.uiSettings.isLocationButtonEnabled = true
-        naverMap.locationTrackingMode = LocationTrackingMode.Follow
+        naverMap.locationSource = locationSource // 위치 연결
+        naverMap.uiSettings.isLocationButtonEnabled = true // 내 위치 버튼 표시
+        naverMap.locationTrackingMode = LocationTrackingMode.Follow // 카메라가 내 위치를 따라다니는 모드 설정
         setupButtonListeners()
 
-        naverMap.addOnCameraIdleListener {
+        naverMap.addOnCameraIdleListener { // 지도 카메라 이동이 멈출 때마다 현재 화면 범위에 맞게 마커 업데이트
             updateMarkers("CCTV")
             updateMarkers("LIGHT")
         }
@@ -416,7 +413,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun setupButtonListeners() {
+    private fun setupButtonListeners() { // CCTV와 보안등 보기 버튼 
         val cctvBtn        = findViewById<ImageButton>(R.id.cctv_btn)
         val streetlightBtn = findViewById<ImageButton>(R.id.streetlight_btn)
         cctvBtn.setOnClickListener {
@@ -431,13 +428,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun updateMarkers(type: String) {
+    private fun updateMarkers(type: String) { // 마커 업데이트
         val isVisible     = if (type == "CCTV") isCctvVisible else isLightVisible
         val activeMarkers = if (type == "CCTV") activeCctvMarkers else activeLightMarkers
         activeMarkers.forEach { it.map = null }
-        activeMarkers.clear()
-        if (!isVisible || naverMap.cameraPosition.zoom < MIN_ZOOM_LEVEL) return
-        val bounds = naverMap.contentBounds
+        activeMarkers.clear() // 기존 마커 전부 지도에서 제거 + 목록 비움.
+        if (!isVisible || naverMap.cameraPosition.zoom < MIN_ZOOM_LEVEL) return // 숨김 상태/ 줌이 너무 작으면 여기서 종료함.
+        val bounds = naverMap.contentBounds  // 현재 지도 화면의 경계 좌표
         lifecycleScope.launch {
             val dataList = withContext(Dispatchers.IO) {
                 AppDatabase.getDatabase(applicationContext).safetyDao()
@@ -457,7 +454,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             }
         }
     }
-
+    // 사용자가 위치 권한 허용/거부했을때 처리. 거부하면 위치 추적모드를 None으로함.
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         if (locationSource.onRequestPermissionsResult(requestCode, permissions, grantResults)) {
             if (!locationSource.isActivated) naverMap.locationTrackingMode = LocationTrackingMode.None
@@ -466,7 +463,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
-    companion object {
+    companion object { // 위치 권한 요청
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1000
     }
 }
