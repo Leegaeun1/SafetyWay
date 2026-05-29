@@ -86,6 +86,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         startLocationUpdates() // GPS 업데이트 시작
         setupMainSearchCard() // 메인 검색 카드 설정
         setupRouteInputCard() // 경로 입력 카드 설정
+        setupDataSourceButton() // 데이터 출처 설정
     }
     @android.annotation.SuppressLint("MissingPermission") // 경고 무시
     private fun startLocationUpdates() { // GPS 업데이트.
@@ -122,6 +123,51 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
         fusedClient.requestLocationUpdates(req, locationCallback!!, mainLooper) // 실제로 GPS 업데이트 시작! 메인스레드에서 받음.
     }
+    // 뒤로가기: route_input_card 보이면 -> main_search_card로, 아니면 기본 종료
+    override fun onBackPressed() {
+        val routeCard = findViewById<CardView>(R.id.route_input_card)
+        if (routeCard.visibility == View.VISIBLE) {
+            resetToMainSearch()
+        } else {
+            super.onBackPressed()
+        }
+    }
+    private fun setupDataSourceButton() {
+        findViewById<ImageButton>(R.id.btn_data_source).setOnClickListener {
+            val dialogView = layoutInflater.inflate(R.layout.dialog_data_source, null)
+
+            val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+                .setView(dialogView)
+                .create()
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+            dialogView.findViewById<android.widget.Button>(R.id.btn_dialog_confirms)
+                .setOnClickListener { dialog.dismiss() }
+            dialog.show()
+        }
+    }
+
+    private fun resetToMainSearch() {
+        // 카드 전환
+        findViewById<CardView>(R.id.route_input_card).visibility = View.GONE
+        findViewById<CardView>(R.id.main_search_card).visibility = View.VISIBLE
+
+        // 경로/마커/상태 초기화
+        clearPolylines()
+        goalLatLng = null
+        startLatLng = null
+        routeResults = listOf()
+        selectedRouteIndex = 0
+
+        // 경로 결과 카드 & 네비 버튼 숨김
+        findViewById<android.widget.HorizontalScrollView>(R.id.route_result_scroll).visibility = View.GONE
+        findViewById<android.widget.Button>(R.id.btn_start_navi).visibility = View.GONE
+
+        // 입력창 초기화
+        findViewById<android.widget.EditText>(R.id.start_input).setText("")
+        findViewById<android.widget.EditText>(R.id.goal_input).setText("")
+    }
+
     override fun onDestroy() { // 화면 종료
         super.onDestroy()
         locationCallback?.let { fusedClient.removeLocationUpdates(it) } // GPS 업데이트 구독해제. 안하면 메모리 누수 + 배터리 낭비!
@@ -141,7 +187,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         showRouteInputCard()
 
         when (pendingTarget) {
-            "goal" -> { // 목적지 검색임 
+            "goal" -> { // 목적지 검색임
                 findViewById<EditText>(R.id.goal_input).setText(name)
                 goalLatLng = LatLng(lat, lng)
                 // 출발지도 이미 설정되어 있으면 바로 경로탐색
@@ -385,6 +431,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         this.naverMap = naverMap
         naverMap.locationSource = locationSource // 위치 연결
         naverMap.uiSettings.isLocationButtonEnabled = true // 내 위치 버튼 표시
+        naverMap.uiSettings.isZoomControlEnabled = false
         naverMap.locationTrackingMode = LocationTrackingMode.Follow // 카메라가 내 위치를 따라다니는 모드 설정
         setupButtonListeners()
 

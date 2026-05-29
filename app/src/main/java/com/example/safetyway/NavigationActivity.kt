@@ -198,7 +198,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         this.naverMap = naverMap
         naverMap.locationSource = locationSource
         naverMap.locationTrackingMode = LocationTrackingMode.Face
-
+        naverMap.uiSettings.isZoomControlEnabled = false
         // 위치 버튼 활성화 (동그란 버튼)
         naverMap.uiSettings.isLocationButtonEnabled = true
         naverMap.setContentPadding(0, 0, 0, 250)  // 하단 카드 높이만큼 패딩
@@ -326,6 +326,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
 
         // 6. CCTV 사각지대 감지
         checkBlindSpot(current)
+
         lastLocation = current
     }
 
