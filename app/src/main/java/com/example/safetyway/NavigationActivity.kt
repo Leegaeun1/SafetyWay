@@ -1,5 +1,6 @@
 package com.example.safetyway
 
+import android.content.Intent
 import android.graphics.Color
 import android.location.Location
 import android.media.AudioManager
@@ -111,6 +112,12 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             finish()
         }
         setupSirenButton()
+        findViewById<ImageButton>(R.id.call_btn).apply {
+            // 가짜 통화 바로 실행
+            setOnClickListener {
+                startActivity(Intent(this@NavigationActivity, FakeCallActivity::class.java))
+            }
+        }
     }
     // 비상 사이렌 버튼 설정
     private fun setupSirenButton() {
@@ -157,7 +164,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         } catch (e: Exception) {
             e.printStackTrace()
             isSirenOn = false
-            android.widget.Toast.makeText(this, "사이렌 오류: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            //android.widget.Toast.makeText(this, "사이렌 오류: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 

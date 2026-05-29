@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1a1f2e"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- 타이틀 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="가짜 통화 설정"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="32dp" />
+
+        <!-- ─── 발신자 이름 ─────────────────────────── -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="발신자 이름"
+            android:textColor="#AAAAAA"
+            android:textSize="13sp"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/et_caller_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="예: 아빠"
+            android:inputType="text"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#666666"
+            android:background="@drawable/input_bg"
+            android:padding="14dp"
+            android:textSize="16sp" />
+
+        <!-- ─── 구분선 ────────────────────────────── -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#2a2f3e"
+            android:layout_marginTop="28dp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- ─── 연락처 번호 목록 ──────────────────────── -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="연락처 번호"
+            android:textColor="#AAAAAA"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="맨 위 번호로 통화 화면에 표시되고 받기 버튼을 누르면 문자가 발송돼요.\n번호가 없으면 랜덤 번호로 표시되고 문자는 안 가요."
+            android:textColor="#666666"
+            android:textSize="12sp"
+            android:lineSpacingExtra="3dp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- 번호 목록 컨테이너 -->
+        <LinearLayout
+            android:id="@+id/ll_number_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/script_bg"
+            android:padding="12dp"
+            android:layout_marginBottom="12dp" />
+
+        <!-- 번호 추가 입력줄 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/et_new_number"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="010xxxxxxxx"
+                android:inputType="phone"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#555555"
+                android:background="@drawable/input_bg"
+                android:padding="12dp"
+                android:textSize="15sp"
+                android:layout_marginEnd="8dp" />
+
+            <ImageButton
+                android:id="@+id/btn_add_number"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/circle_green_btn"
+                android:src="@android:drawable/ic_input_add"
+                android:padding="12dp"
+                android:contentDescription="번호 추가" />
+
+        </LinearLayout>
+
+        <!-- ─── 구분선 ────────────────────────────── -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#2a2f3e"
+            android:layout_marginTop="28dp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- ─── 문자 내용 ──────────────────────────── -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="통화 받기 시 자동 발송 문자"
+            android:textColor="#AAAAAA"
+            android:textSize="13sp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="번호가 등록된 경우에만 발송돼요"
+            android:textColor="#666666"
+            android:textSize="12sp"
+            android:layout_marginBottom="12dp" />
+
+        <EditText
+            android:id="@+id/et_sms_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="예: 지금 귀가 중이야. 곧 도착해! or 혼자 가고있어서 무서워서 그러는데 혹시 전화 걸어주실 수 있나요??"
+            android:inputType="textMultiLine"
+            android:minLines="3"
+            android:gravity="top"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#555555"
+            android:background="@drawable/input_bg"
+            android:padding="14dp"
+            android:textSize="15sp" />
+
+        <!--구분선-->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#2a2f3e"
+            android:layout_marginTop="28dp"
+            android:layout_marginBottom="24dp" />
+
+        <!--음성 녹음 섹션-->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="통화 중 재생할 목소리 녹음"
+            android:textColor="#AAAAAA"
+            android:textSize="13sp"
+            android:layout_marginBottom="6dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="아빠 목소리 흉내내서 미리 녹음해두면\n통화 받기 누를 때 자동으로 틀어줘요 😊\n시간 제한은 없어요!"
+            android:textColor="#666666"
+            android:textSize="12sp"
+            android:lineSpacingExtra="3dp"
+            android:layout_marginBottom="20dp" />
+
+        <TextView
+            android:id="@+id/tv_record_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="아직 녹음된 목소리가 없어요"
+            android:textColor="#BBBBBB"
+            android:textSize="14sp"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:id="@+id/tv_record_timer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textColor="#FF5555"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btn_record"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="🎙 녹음 시작"
+            android:textSize="15sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#3D6BF5"
+            android:layout_marginBottom="12dp" />
+
+        <LinearLayout
+            android:id="@+id/layout_audio_controls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/btn_play_preview"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:text="▶ 미리 듣기"
+                android:textSize="13sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#2a3550"
+                android:layout_marginEnd="8dp" />
+
+            <ImageButton
+                android:id="@+id/btn_delete_audio"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/circle_red_btn"
+                android:src="@android:drawable/ic_menu_delete"
+                android:padding="12dp"
+                android:contentDescription="녹음 삭제" />
+
+        </LinearLayout>
+
+        <!-- 대본 참고 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="💡 대본 예시"
+            android:textColor="#AAAAAA"
+            android:textSize="13sp"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="10dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/script_bg"
+            android:padding="16dp">
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="0초  ｢우리 딸~ 어디야 지금?｣"
+                android:textColor="#CCCCCC" android:textSize="13sp" android:fontFamily="monospace" android:layout_marginBottom="6dp"/>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="3초  （침묵 — 내가 대답하는 척. 실제로 말하기.）"
+                android:textColor="#777777" android:textSize="13sp" android:fontFamily="monospace" android:layout_marginBottom="6dp"/>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="5초  ｢빨리 와~ 밥 다 됐어｣"
+                android:textColor="#CCCCCC" android:textSize="13sp" android:fontFamily="monospace" android:layout_marginBottom="6dp"/>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="9초  （침묵）"
+                android:textColor="#777777" android:textSize="13sp" android:fontFamily="monospace" android:layout_marginBottom="6dp"/>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="11초 ｢알겠어, 조심히 와｣"
+                android:textColor="#CCCCCC" android:textSize="13sp" android:fontFamily="monospace"/>
+        </LinearLayout>
+
+        <!-- 저장 버튼 -->
+        <Button
+            android:id="@+id/btn_save_setting"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="저장하기"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#3D6BF5"
+            android:layout_marginTop="32dp"
+            android:layout_marginBottom="24dp" />
+
+    </LinearLayout>
+</ScrollView>

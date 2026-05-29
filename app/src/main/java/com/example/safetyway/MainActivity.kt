@@ -254,7 +254,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 }
                 showRouteCards(results) // 경로 카드를 보여줌.
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "경로 탐색 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                //Toast.makeText(this@MainActivity, "경로 탐색 실패: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -413,7 +413,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun setupButtonListeners() { // CCTV와 보안등 보기 버튼 
+    private fun setupButtonListeners() { // CCTV와 보안등 보기, 통화 설정 버튼
+        findViewById<ImageButton>(R.id.btn_fake_call_setting).setOnClickListener {
+            startActivity(Intent(this, FakeCallSettingActivity::class.java))
+        }
         val cctvBtn        = findViewById<ImageButton>(R.id.cctv_btn)
         val streetlightBtn = findViewById<ImageButton>(R.id.streetlight_btn)
         cctvBtn.setOnClickListener {
