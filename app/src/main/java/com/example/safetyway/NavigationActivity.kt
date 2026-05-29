@@ -2,6 +2,8 @@ package com.example.safetyway
 
 import android.graphics.Color
 import android.location.Location
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.widget.ImageButton
 import android.widget.TextView
@@ -52,6 +54,11 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     private val naviLightMarkers = mutableListOf<Marker>()
     private val MIN_ZOOM_LEVEL = 14.0
 
+    // 비상 사이렌
+    private var sirenPlayer: MediaPlayer? = null
+    private var isSirenOn = false
+    private lateinit var audioManager: AudioManager
+    private var savedVolume = 0  // 사이렌 종료 후 원래 볼륨으로 복원하기 위해 저장
     companion object {
         const val EXTRA_PATH_LAT = "path_lat"
         const val EXTRA_PATH_LNG = "path_lng"
@@ -68,6 +75,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_navigation)
+        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
 
         // MainActivity에서 경로 데이터 받기
         val lats = intent.getDoubleArrayExtra(EXTRA_PATH_LAT) ?: return
@@ -102,8 +110,77 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         findViewById<ImageButton>(R.id.btn_close_navi).setOnClickListener {
             finish()
         }
+        setupSirenButton()
+    }
+    // 비상 사이렌 버튼 설정
+    private fun setupSirenButton() {
+        val sosBtn = findViewById<ImageButton>(R.id.sos_btn)
+        sosBtn.setOnClickListener {
+            if (isSirenOn) stopSiren() else startSiren()
+            // 아이콘 토글 (활성/비활성 상태 구분)
+            sosBtn.setImageResource(
+                if (isSirenOn) R.drawable.is_siren_off else R.drawable.is_siren_on
+            )
+        }
+    }
+    private fun startSiren() {
+        isSirenOn = true
+
+        // 이어폰 연결 여부 확인 (API 버전 무관하게 안전한 방식)
+        val audioDevices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        val isHeadsetConnected = audioDevices.any { device ->
+            device.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        }
+
+        // 이어폰 있으면 STREAM_MUSIC(이어폰), 없으면 STREAM_ALARM(스피커) - 테스트 하기위해 이어폰을 추가해두었음.
+        val streamType = if (isHeadsetConnected) {
+            AudioManager.STREAM_MUSIC
+        } else {
+            AudioManager.STREAM_ALARM
+        }
+
+        // 볼륨 저장 후 조절
+        // TODO: 실제 배포 시 0.6f -> 1.0f 로 변경!
+        val maxVolume = audioManager.getStreamMaxVolume(streamType) // 최대 볼륨
+        savedVolume = audioManager.getStreamVolume(streamType)
+        val targetVolume = (maxVolume * 0.6f).toInt()
+        audioManager.setStreamVolume(streamType, targetVolume, 0) // 볼륨 설정
+
+        try {
+            sirenPlayer = MediaPlayer.create(applicationContext, R.raw.scream).apply {
+                isLooping = true
+                start()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            isSirenOn = false
+            android.widget.Toast.makeText(this, "사이렌 오류: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
+    private fun stopSiren() {
+        isSirenOn = false
+
+        sirenPlayer?.apply {
+            if (isPlaying) stop()
+            release()
+        }
+        sirenPlayer = null
+
+        // 사용한 스트림 타입에 맞게 볼륨 복원
+        val audioDevices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        val isHeadsetConnected = audioDevices.any { device ->
+            device.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        }
+        val streamType = if (isHeadsetConnected) AudioManager.STREAM_MUSIC else AudioManager.STREAM_ALARM
+        audioManager.setStreamVolume(streamType, savedVolume, 0)
+    }
     override fun onMapReady(naverMap: NaverMap) {
         this.naverMap = naverMap
         naverMap.locationSource = locationSource
@@ -111,6 +188,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
 
         // 위치 버튼 활성화 (동그란 버튼)
         naverMap.uiSettings.isLocationButtonEnabled = true
+        naverMap.setContentPadding(0, 0, 0, 250)  // 하단 카드 높이만큼 패딩
 
         // 목적지 마커
         goalMarker = Marker().apply {
@@ -325,6 +403,11 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         android.widget.Toast.makeText(this, "경로를 벗어났습니다. 재탐색 중...", android.widget.Toast.LENGTH_SHORT).show()
     }
 
+    // 액티비티 종료 시 사이렌 반드시 정리
+    override fun onDestroy() {
+        super.onDestroy()
+        stopSiren()
+    }
     private fun distanceBetween(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val dLat = Math.toRadians(lat2 - lat1)
         val dLng = Math.toRadians(lng2 - lng1)
