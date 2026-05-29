@@ -1,0 +1,422 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/fake_call_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1a1f2e"
+    android:fitsSystemWindows="true">
+
+    <!-- 수신 화면 (incoming_layout)-->
+    <LinearLayout
+        android:id="@+id/incoming_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:visibility="visible">
+
+        <!-- 상단: 수신전화 텍스트 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="56dp"
+            android:text="수신전화"
+            android:textColor="#AAAAAA"
+            android:textSize="14sp" />
+
+        <!-- 프로필 영역 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <!-- 프로필 원형 아바타 -->
+            <FrameLayout
+                android:layout_width="120dp"
+                android:layout_height="120dp"
+                android:layout_marginBottom="24dp">
+
+                <View
+                    android:layout_width="120dp"
+                    android:layout_height="120dp"
+                    android:background="@drawable/circle_avatar_bg" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="👨"
+                    android:textSize="52sp" />
+            </FrameLayout>
+
+            <!-- 이름 -->
+            <TextView
+                android:id="@+id/tv_caller_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="아빠"
+                android:textColor="#FFFFFF"
+                android:textSize="32sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <!-- 전화번호 -->
+            <TextView
+                android:id="@+id/tv_caller_number"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="010-0000-0000"
+                android:textColor="#BBBBBB"
+                android:textSize="16sp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- 마지막 통화 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="휴대전화"
+                android:textColor="#888888"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+
+        <!-- 하단: 받기 / 거절 버튼 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="60dp"
+            android:weightSum="3">
+
+            <!-- 받기 버튼 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+
+                <ImageButton
+                    android:id="@+id/btn_accept"
+                    android:layout_width="72dp"
+                    android:layout_height="72dp"
+                    android:background="@drawable/circle_green_btn"
+                    android:src="@android:drawable/ic_menu_call"
+                    android:scaleType="centerInside"
+                    android:padding="18dp"
+                    app:tint="#FFFFFF" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="받기"
+                    android:textColor="#AAAAAA"
+                    android:textSize="12sp"
+                    android:layout_marginTop="8dp" />
+            </LinearLayout>
+
+            <!-- 가운데 공백 -->
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <!-- 거절 버튼 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+
+                <ImageButton
+                    android:id="@+id/btn_decline"
+                    android:layout_width="72dp"
+                    android:layout_height="72dp"
+                    android:background="@drawable/circle_red_btn"
+                    android:src="@android:drawable/ic_menu_call"
+                    android:scaleType="centerInside"
+                    android:padding="18dp"
+                    app:tint="#FFFFFF"
+                    android:rotation="135" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="거절"
+                    android:textColor="#AAAAAA"
+                    android:textSize="12sp"
+                    android:layout_marginTop="8dp" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- 메시지 보내기 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="메시지 보내기"
+            android:textColor="#888888"
+            android:textSize="13sp"
+            android:layout_marginBottom="24dp" />
+
+    </LinearLayout>
+
+    <!--통화 중 화면 (active_layout)-->
+    <LinearLayout
+        android:id="@+id/active_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:visibility="gone">
+
+        <!-- 상단 상태 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="56dp"
+            android:text="HD Voice"
+            android:textColor="#AAAAAA"
+            android:textSize="13sp" />
+
+        <!-- 타이머 -->
+        <TextView
+            android:id="@+id/tv_call_timer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="00:00"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp" />
+
+        <!-- 이름 + 번호 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/tv_active_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="아빠"
+                android:textColor="#FFFFFF"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tv_active_number"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="010-0000-0000"
+                android:textColor="#BBBBBB"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <!-- 하단 버튼들 (녹음, 스피커, 음소거, 키패드) -->
+        <GridLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:columnCount="3"
+            android:rowCount="2"
+            android:layout_marginStart="24dp"
+            android:layout_marginEnd="24dp"
+            android:layout_marginBottom="24dp">
+
+            <!-- 녹음 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_columnWeight="1"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="12dp">
+
+                <ImageButton
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="@drawable/circle_dark_btn"
+                    android:src="@android:drawable/ic_btn_speak_now"
+                    app:tint="#FFFFFF"
+                    android:padding="14dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="녹음"
+                    android:textColor="#AAAAAA"
+                    android:textSize="11sp"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+
+            <!-- 영상통화 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_columnWeight="1"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="12dp">
+
+                <ImageButton
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="@drawable/circle_dark_btn"
+                    android:src="@android:drawable/ic_menu_camera"
+                    app:tint="#FFFFFF"
+                    android:padding="14dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="영상통화"
+                    android:textColor="#AAAAAA"
+                    android:textSize="11sp"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+
+            <!-- 블루투스 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_columnWeight="1"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="12dp">
+
+                <ImageButton
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="@drawable/circle_dark_btn"
+                    android:src="@android:drawable/stat_sys_data_bluetooth"
+                    app:tint="#FFFFFF"
+                    android:padding="14dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="블루투스"
+                    android:textColor="#AAAAAA"
+                    android:textSize="11sp"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+
+            <!-- 스피커 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_columnWeight="1"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="12dp">
+
+                <ImageButton
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="@drawable/circle_dark_btn"
+                    android:src="@android:drawable/ic_lock_silent_mode_off"
+                    app:tint="#FFFFFF"
+                    android:padding="14dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="스피커"
+                    android:textColor="#AAAAAA"
+                    android:textSize="11sp"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+
+            <!-- 음소거 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_columnWeight="1"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="12dp">
+
+                <ImageButton
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="@drawable/circle_dark_btn"
+                    android:src="@android:drawable/ic_lock_silent_mode"
+                    app:tint="#FFFFFF"
+                    android:padding="14dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="내 소리 차단"
+                    android:textColor="#AAAAAA"
+                    android:textSize="11sp"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+
+            <!-- 키패드 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_columnWeight="1"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="12dp">
+
+                <ImageButton
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="@drawable/circle_dark_btn"
+                    android:src="@android:drawable/ic_menu_sort_by_size"
+                    app:tint="#FFFFFF"
+                    android:padding="14dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="키패드"
+                    android:textColor="#AAAAAA"
+                    android:textSize="11sp"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+
+        </GridLayout>
+
+        <!-- 끊기 버튼 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginBottom="48dp">
+
+            <ImageButton
+                android:id="@+id/btn_hangup"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:background="@drawable/circle_red_btn"
+                android:src="@android:drawable/ic_menu_call"
+                android:scaleType="centerInside"
+                android:padding="18dp"
+                android:rotation="135"
+                app:tint="#FFFFFF" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="끊기"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="8dp"/>
+        </LinearLayout>
+
+    </LinearLayout>
+
+</RelativeLayout>

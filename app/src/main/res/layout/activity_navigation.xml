@@ -3,7 +3,8 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
 
     <!-- 지도 -->
     <androidx.fragment.app.FragmentContainerView
@@ -52,7 +53,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_alignParentEnd="true"
-        android:layout_centerVertical="true"
+        android:layout_marginTop="120dp"
         android:orientation="vertical">
         <ImageButton
             android:id="@+id/navi_cctv_btn"
@@ -68,6 +69,20 @@
             android:background="@null"
             android:scaleType="fitCenter"
             android:src="@drawable/streetlight_see"/>
+        <ImageButton
+            android:id="@+id/sos_btn"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:background="@null"
+            android:scaleType="fitCenter"
+            android:src="@drawable/is_siren_on"/>
+        <ImageButton
+            android:id="@+id/call_btn"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:background="@null"
+            android:scaleType="fitCenter"
+            android:src="@drawable/fake_call"/>
     </LinearLayout>
 
     <!-- 하단 정보 카드 -->
@@ -75,7 +90,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
-        android:layout_margin="16dp"
+        android:layout_marginBottom="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="16dp"
         app:cardCornerRadius="16dp"
         app:cardElevation="8dp">
         <LinearLayout
