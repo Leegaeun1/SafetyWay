@@ -278,7 +278,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                 fullPath[i+1].latitude, fullPath[i+1].longitude
             )
         }
-        // 현재 위치 → closestIndex 좌표까지의 잔여 거리도 포함
+        // 현재 위치 -> closestIndex 좌표까지의 잔여 거리도 포함
         if (closestIndex < fullPath.size) {
             remainingDist += distanceBetween(
                 current.latitude, current.longitude,
@@ -286,9 +286,9 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             )
         }
 
-        val remainingMin = maxOf(1, (remainingDist / WALK_SPEED_M_PER_MIN).toInt())
+        val remainingMin = (remainingDist / 65.0).toInt().coerceAtLeast(1)  // 65m/분
         val remainingKm = "%.1f".format(remainingDist / 1000.0)
-        val remainingSteps = (remainingDist * 1.3).toInt()
+        val remainingSteps = (remainingDist * 1.4).toInt()  // 1m = 1.4걸음
 
         val direction = if (closestIndex < fullPath.size - 1) {
             getDirectionText(current, fullPath[closestIndex + 1])

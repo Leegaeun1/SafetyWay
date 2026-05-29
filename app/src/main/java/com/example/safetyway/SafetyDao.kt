@@ -31,6 +31,17 @@ interface SafetyDao {
         minLng: Double, maxLng: Double,
         minCount: Int = 2
     ): List<SafetyPoint>
+
+    @Query("""
+    SELECT * FROM safety_info 
+    WHERE (latitude BETWEEN :minLat AND :maxLat) 
+    AND (longitude BETWEEN :minLng AND :maxLng)
+""")
+    suspend fun getAllSafetyInBounds(
+        minLat: Double, maxLat: Double,
+        minLng: Double, maxLng: Double
+    ): List<SafetyEntity>
+
 }
 
 // DAO 파일 아래에 같이 추가
