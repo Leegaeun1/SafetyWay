@@ -6,9 +6,12 @@ import android.location.Location
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Bundle
+import android.view.View
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.cardview.widget.CardView
 import androidx.lifecycle.lifecycleScope
 import com.naver.maps.geometry.LatLng
 import com.naver.maps.map.LocationTrackingMode
@@ -51,6 +54,9 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private var isNaviCctvVisible = false
     private var isNaviLightVisible = false
+    // 사각지대 경고 상태
+    private var isBlindSpotWarningShown = false
+    private val CCTV_BLIND_SPOT_RADIUS = 150.0  // CCTV 없는 구간으로 판단할 반경(m)
     private val naviCctvMarkers = mutableListOf<Marker>()
     private val naviLightMarkers = mutableListOf<Marker>()
     private val MIN_ZOOM_LEVEL = 14.0
@@ -318,6 +324,8 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             onOffRoute(current)
         }
 
+        // 6. CCTV 사각지대 감지
+        checkBlindSpot(current)
         lastLocation = current
     }
 
@@ -415,6 +423,53 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         super.onDestroy()
         stopSiren()
     }
+    /**
+     * 현재 위치 반경 CCTV_BLIND_SPOT_RADIUS(m) 안에 CCTV가 없으면 경고 카드 표시
+     * DB 조회는 IO 스레드에서, UI 업데이트는 Main 스레드에서 처리
+     */
+    private fun checkBlindSpot(current: LatLng) {
+        val warningCard = findViewById<CardView>(R.id.blind_spot_warning_card)
+        val tvDistance = findViewById<TextView>(R.id.tv_blind_spot_distance)
+        val ivIcon = findViewById<ImageView>(R.id.iv_blind_spot_icon)
+        ivIcon.setColorFilter(android.graphics.Color.parseColor("#FF6600"), android.graphics.PorterDuff.Mode.SRC_IN)
+
+        // 위도/경도 1도 ==> 111km -> 150m를 도 단위로 변환
+        val degreeOffset = CCTV_BLIND_SPOT_RADIUS / 111000.0
+
+        lifecycleScope.launch {
+            val nearbyCount = withContext(Dispatchers.IO) {
+                AppDatabase.getDatabase(applicationContext).safetyDao()
+                    .getSafetyInBounds(
+                        current.latitude - degreeOffset,
+                        current.latitude + degreeOffset,
+                        current.longitude - degreeOffset,
+                        current.longitude + degreeOffset,
+                        "CCTV"
+                    ).count { item ->
+                        // 실제 거리로 한 번 더 필터링 (사각형 쿼리 -> 원형 보정)
+                        distanceBetween(
+                            current.latitude, current.longitude,
+                            item.latitude, item.longitude
+                        ) <= CCTV_BLIND_SPOT_RADIUS
+                    }
+            }
+
+            withContext(Dispatchers.Main) {
+                val isBlindSpot = nearbyCount == 0
+                if (isBlindSpot && !isBlindSpotWarningShown) {
+                    // 사각지대 진입 -> 카드 표시
+                    tvDistance.text = "${CCTV_BLIND_SPOT_RADIUS.toInt()}m 이전까지 CCTV가 없습니다!"
+                    warningCard.visibility = View.VISIBLE
+                    isBlindSpotWarningShown = true
+                } else if (!isBlindSpot && isBlindSpotWarningShown) {
+                    // CCTV 범위 재진입 -> 카드 숨김
+                    warningCard.visibility = View.GONE
+                    isBlindSpotWarningShown = false
+                }
+            }
+        }
+    }
+
     private fun distanceBetween(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val dLat = Math.toRadians(lat2 - lat1)
         val dLng = Math.toRadians(lng2 - lng1)
