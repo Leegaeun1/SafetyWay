@@ -13,6 +13,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.lifecycle.lifecycleScope
+import com.google.firebase.firestore.FirebaseFirestore
 import com.naver.maps.geometry.LatLng
 import com.naver.maps.map.LocationTrackingMode
 import com.naver.maps.map.MapFragment
@@ -256,8 +257,10 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         if (!isVisible || naverMap.cameraPosition.zoom < MIN_ZOOM_LEVEL) return
 
         val bounds = naverMap.contentBounds
+
         lifecycleScope.launch {
-            val dataList = withContext(Dispatchers.IO) {
+            // 1. 공공데이터 불러오기
+            val localDataList = withContext(Dispatchers.IO) {
                 AppDatabase.getDatabase(applicationContext).safetyDao()
                     .getSafetyInBounds(
                         bounds.southWest.latitude, bounds.northEast.latitude,
@@ -265,19 +268,51 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                         type
                     )
             }
+
             withContext(Dispatchers.Main) {
-                for (item in dataList) {
+                // 로컬 마커 그리기
+                for (item in localDataList) {
                     val marker = Marker().apply {
                         position = LatLng(item.latitude, item.longitude)
                         map = naverMap
                         icon = OverlayImage.fromResource(
                             if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight
                         )
-                        width = 60
-                        height = 60
+                        width = 60; height = 60
                     }
                     activeMarkers.add(marker)
                 }
+
+                // 2. 파이어베이스 승인 제보 데이터 불러오기
+                val firestoreType = if (type == "CCTV") "CCTV" else "보안등"
+
+                FirebaseFirestore.getInstance().collection("reports")
+                    .whereEqualTo("status", "APPROVED")
+                    .whereEqualTo("type", firestoreType)
+                    .get()
+                    .addOnSuccessListener { documents ->
+                        for (document in documents) {
+                            val lat = document.getDouble("latitude") ?: continue
+                            val lng = document.getDouble("longitude") ?: continue
+
+                            // 화면 범위 필터링
+                            if (lat in bounds.southWest.latitude..bounds.northEast.latitude &&
+                                lng in bounds.southWest.longitude..bounds.northEast.longitude) {
+
+                                val marker = Marker().apply {
+                                    position = LatLng(lat, lng)
+                                    map = naverMap
+                                    icon = OverlayImage.fromResource(if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight)
+                                    width = 60; height = 60
+                                    captionText = "사용자 제보"
+                                    captionTextSize = 10f
+                                    captionColor = Color.parseColor("#3D6BF5")
+                                    captionMinZoom = 15.0
+                                }
+                                activeMarkers.add(marker)
+                            }
+                        }
+                    }
             }
         }
     }
