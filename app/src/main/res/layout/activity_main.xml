@@ -19,7 +19,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_alignParentEnd="true"
-        android:layout_marginTop="100dp"
+        android:layout_marginTop="110dp"
         android:orientation="vertical">
 
         <ImageButton
@@ -44,7 +44,13 @@
             android:background="@null"
             android:scaleType="fitCenter"
             android:src="@drawable/call_setting"/>
-
+        <ImageButton
+            android:id="@+id/btn_data_source"
+            android:layout_width="80dp"
+            android:layout_height="40dp"
+            android:background="@null"
+            android:scaleType="fitCenter"
+            android:src="@drawable/data_source"/>
     </LinearLayout>
 
     <!-- [메인] 어디로 갈까요? 카드 -->

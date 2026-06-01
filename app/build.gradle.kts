@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp") version "2.0.21-1.0.28"
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -83,5 +84,13 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.0.1")
     implementation("androidx.cardview:cardview:1.0.0")
     implementation("com.google.android.material:material:1.11.0")
+    // Firebase BoM (버전 관리용)
+    implementation(platform("com.google.firebase:firebase-bom:32.8.0"))
+    // Cloud Firestore (제보 텍스트/좌표 저장용)
+    implementation ("com.google.firebase:firebase-firestore")
+
+    // Firebase Storage (제보 이미지 파일 저장용)
+    implementation ("com.google.firebase:firebase-storage")
+    implementation("com.google.firebase:firebase-analytics")
 
 }

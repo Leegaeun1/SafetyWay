@@ -4,5 +4,7 @@
         <item name="colorPrimary">@color/purple_500</item>
         <item name="android:statusBarColor">#FFFFFF</item>
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:fontFamily">@font/memoment_kkukkukk_ttf</item>
+        <item name="fontFamily">@font/memoment_kkukkukk_ttf</item>
     </style>
 </resources>

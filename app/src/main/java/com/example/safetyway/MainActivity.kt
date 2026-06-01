@@ -1,20 +1,26 @@
 package com.example.safetyway
 
-import android.app.Activity // 다른 화면에서 결과 받아올 때 필요
-import android.content.Intent // 화면 전환시 필요
+import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
-import android.os.Bundle // 화면 생성될 때 이전 상태 데이터 넘겨받는 묶음
-import android.view.View // UI요소들
+import android.net.Uri
+import android.os.Bundle
+import android.provider.MediaStore
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
-import androidx.lifecycle.lifecycleScope // Activity 생명주기에 묶인 코루틴 스코프. 화면이 꺼지면 자동으로 코루틴도 취소됨
-import com.naver.maps.geometry.LatLng // 네이버지도의 위경도 좌표 클래스.
+import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import com.naver.maps.geometry.LatLng
 import com.naver.maps.map.LocationTrackingMode
 import com.naver.maps.map.MapFragment
 import com.naver.maps.map.NaverMap
@@ -22,10 +28,15 @@ import com.naver.maps.map.OnMapReadyCallback
 import com.naver.maps.map.overlay.Marker
 import com.naver.maps.map.overlay.OverlayImage
 import com.naver.maps.map.overlay.PolylineOverlay
-import com.naver.maps.map.util.FusedLocationSource // 더 정확한 위치를 뽑아주는 위치 소스!
+import com.naver.maps.map.util.FusedLocationSource
+import com.naver.maps.map.util.MarkerIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var locationSource: FusedLocationSource
@@ -52,6 +63,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private var pendingTarget: String = "goal" // 검색창을 열었을 때 출발지인지 목적지 검색인지 기억!
     private lateinit var fusedClient: com.google.android.gms.location.FusedLocationProviderClient // GPS 업데이트를 요청/취소하는 클라이언트
     private var locationCallback: com.google.android.gms.location.LocationCallback? = null // 위치 업데이트 콜백 객체
+    // 길게 눌렀을 때 나타날 임시 마커
+    private var tempReportMarker: Marker? = null
+    private var photoUri: Uri? = null
+    private var photoFile: File? = null
     data class RouteResult( // 경로 하나를 표현하는 데이터 클래스. 
         val path: List<List<Double>>, // 좌표 목록
         val distanceM: Int, // 거리(미터)
@@ -86,6 +101,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         startLocationUpdates() // GPS 업데이트 시작
         setupMainSearchCard() // 메인 검색 카드 설정
         setupRouteInputCard() // 경로 입력 카드 설정
+        setupDataSourceButton() // 데이터 출처 설정
     }
     @android.annotation.SuppressLint("MissingPermission") // 경고 무시
     private fun startLocationUpdates() { // GPS 업데이트.
@@ -122,6 +138,139 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
         fusedClient.requestLocationUpdates(req, locationCallback!!, mainLooper) // 실제로 GPS 업데이트 시작! 메인스레드에서 받음.
     }
+    private fun createImageFile(): File {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val storageDir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES)
+        return File.createTempFile("REPORT_${timeStamp}_", ".jpg", storageDir)
+    }
+
+    // 카메라 앱 호출 함수
+    private fun dispatchTakePictureIntent() {
+        val file = try {
+            createImageFile()
+        } catch (ex: Exception) {
+            null
+        }
+
+        file?.also {
+            photoFile = it
+            // Android 7.0 이상부터는 FileProvider를 통해 보안 URI를 제공해야 함
+            photoUri = FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.fileprovider",
+                it
+            )
+            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                putExtra(MediaStore.EXTRA_OUTPUT, photoUri)
+            }
+            takePhotoLauncher.launch(intent)
+        }
+    }
+    private fun uploadReport(latLng: LatLng, type: String) {
+        val currentUri = photoUri
+        if (currentUri == null) {
+            Toast.makeText(this, "현장 사진 촬영이 필요합니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        Toast.makeText(this, "제보를 업로드 중입니다...", Toast.LENGTH_SHORT).show()
+
+        val storageRef = FirebaseStorage.getInstance().reference
+        val firestore = FirebaseFirestore.getInstance()
+
+        // 1. 파일명 생성 (예: reports/17123456789.jpg)
+        val fileName = "reports/${System.currentTimeMillis()}.jpg"
+        val imageRef = storageRef.child(fileName)
+
+        // 2. Firebase Storage에 이미지 업로드
+        imageRef.putFile(currentUri)
+            .addOnSuccessListener {
+                // 업로드 성공 시 이미지의 웹 다운로드 URL 주소 가져오기
+                imageRef.downloadUrl.addOnSuccessListener { downloadUrl ->
+
+                    // 3. Firestore에 저장할 데이터 패키징
+                    val reportData = hashMapOf(
+                        "latitude" to latLng.latitude,
+                        "longitude" to latLng.longitude,
+                        "type" to type,
+                        "imageUrl" to downloadUrl.toString(),
+                        "status" to "PENDING", // 최초 상태는 대기 중
+                        "timestamp" to com.google.firebase.Timestamp.now()
+                    )
+
+                    // 4. Firestore 'reports' 컬렉션에 등록
+                    firestore.collection("reports")
+                        .add(reportData)
+                        .addOnSuccessListener {
+                            Toast.makeText(this, "안전 인프라 제보가 접수되었습니다. 검토 후 반영됩니다!", Toast.LENGTH_LONG).show()
+                            // 업로드 완료 후 임시 데이터 비우기
+                            photoUri = null
+                            photoFile = null
+                        }
+                        .addOnFailureListener { e ->
+                            Toast.makeText(this, "데이터베이스 등록 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                }
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(this, "사진 업로드 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+    }
+    // 뒤로가기: route_input_card 보이면 -> main_search_card로, 아니면 기본 종료
+    override fun onBackPressed() {
+        val routeCard = findViewById<CardView>(R.id.route_input_card)
+        if (routeCard.visibility == View.VISIBLE) {
+            resetToMainSearch()
+        } else {
+            super.onBackPressed()
+        }
+    }
+    private fun setupDataSourceButton() {
+        findViewById<ImageButton>(R.id.btn_data_source).setOnClickListener {
+            val dialogView = layoutInflater.inflate(R.layout.dialog_data_source, null)
+
+            val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+                .setView(dialogView)
+                .create()
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+            dialogView.findViewById<android.widget.Button>(R.id.btn_dialog_confirms)
+                .setOnClickListener { dialog.dismiss() }
+            dialog.show()
+        }
+    }
+    private val takePhotoLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            // 사진 촬영 성공 시, photoUri에 이미지 데이터가 담겨 있음
+            Toast.makeText(this, "사진이 촬영되었습니다!", Toast.LENGTH_SHORT).show()
+        } else {
+            photoUri = null
+            photoFile = null
+        }
+    }
+    private fun resetToMainSearch() {
+        // 카드 전환
+        findViewById<CardView>(R.id.route_input_card).visibility = View.GONE
+        findViewById<CardView>(R.id.main_search_card).visibility = View.VISIBLE
+
+        // 경로/마커/상태 초기화
+        clearPolylines()
+        goalLatLng = null
+        startLatLng = null
+        routeResults = listOf()
+        selectedRouteIndex = 0
+
+        // 경로 결과 카드 & 네비 버튼 숨김
+        findViewById<android.widget.HorizontalScrollView>(R.id.route_result_scroll).visibility = View.GONE
+        findViewById<android.widget.Button>(R.id.btn_start_navi).visibility = View.GONE
+
+        // 입력창 초기화
+        findViewById<android.widget.EditText>(R.id.start_input).setText("")
+        findViewById<android.widget.EditText>(R.id.goal_input).setText("")
+    }
+
     override fun onDestroy() { // 화면 종료
         super.onDestroy()
         locationCallback?.let { fusedClient.removeLocationUpdates(it) } // GPS 업데이트 구독해제. 안하면 메모리 누수 + 배터리 낭비!
@@ -141,7 +290,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         showRouteInputCard()
 
         when (pendingTarget) {
-            "goal" -> { // 목적지 검색임 
+            "goal" -> { // 목적지 검색임
                 findViewById<EditText>(R.id.goal_input).setText(name)
                 goalLatLng = LatLng(lat, lng)
                 // 출발지도 이미 설정되어 있으면 바로 경로탐색
@@ -385,6 +534,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         this.naverMap = naverMap
         naverMap.locationSource = locationSource // 위치 연결
         naverMap.uiSettings.isLocationButtonEnabled = true // 내 위치 버튼 표시
+        naverMap.uiSettings.isZoomControlEnabled = false
         naverMap.locationTrackingMode = LocationTrackingMode.Follow // 카메라가 내 위치를 따라다니는 모드 설정
         setupButtonListeners()
 
@@ -411,8 +561,60 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 }
             }
         }
-    }
+        // 지도 길게 누르기 이벤트 감지
+        naverMap.setOnMapLongClickListener { point, latLng ->
+            // 1. 기존에 있던 임시 마커 지우기
+            tempReportMarker?.map = null
 
+            // 2. 길게 누른 위치에 임시 마커 찍기
+            tempReportMarker = Marker().apply {
+                position = latLng
+                map = naverMap
+                icon = MarkerIcons.BLACK // 기본 마커 아이콘 색상 변경
+                iconTintColor = Color.parseColor("#FF6600") // 주황색으로 강조
+                captionText = "제보 위치"
+            }
+
+            // 3. 하단 팝업(바텀 시트) 띄우기
+            showReportBottomSheet(latLng)
+        }
+    }
+    private fun showReportBottomSheet(latLng: LatLng) {
+        val bottomSheetDialog = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val view = layoutInflater.inflate(R.layout.bottom_sheet_report, null)
+        bottomSheetDialog.setContentView(view)
+
+        // 다이얼로그가 닫힐 때 임시 마커도 같이 지도에서 지워주기
+        bottomSheetDialog.setOnDismissListener {
+            tempReportMarker?.map = null
+        }
+
+        // 위치 텍스트 뷰 업데이트 (역 지오코딩으로 주소를 가져올 수도 있지만, 일단 위경도로 표시)
+        val tvAddress = view.findViewById<TextView>(R.id.tv_report_address)
+        tvAddress.text = "좌표: ${String.format("%.4f", latLng.latitude)}, ${String.format("%.4f", latLng.longitude)}"
+
+        // 뷰 내부의 버튼들 가져오기
+        val rgType = view.findViewById<android.widget.RadioGroup>(R.id.rg_infrastructure_type)
+        val btnTakePhoto = view.findViewById<Button>(R.id.btn_take_photo)
+        val btnSubmit = view.findViewById<Button>(R.id.btn_submit_report)
+
+        // 카메라 버튼 클릭 이벤트
+        btnTakePhoto.setOnClickListener {
+            dispatchTakePictureIntent() // 카메라 켜기
+        }
+
+        // 제보하기 버튼 클릭 이벤트
+        btnSubmit.setOnClickListener {
+            val selectedType = if (rgType.checkedRadioButtonId == R.id.rb_cctv) "CCTV" else "보안등"
+
+            // 파이어베이스 업로드 실행
+            uploadReport(latLng, selectedType)
+
+            bottomSheetDialog.dismiss()
+        }
+
+        bottomSheetDialog.show()
+    }
     private fun setupButtonListeners() { // CCTV와 보안등 보기, 통화 설정 버튼
         findViewById<ImageButton>(R.id.btn_fake_call_setting).setOnClickListener {
             startActivity(Intent(this, FakeCallSettingActivity::class.java))
@@ -431,29 +633,70 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun updateMarkers(type: String) { // 마커 업데이트
-        val isVisible     = if (type == "CCTV") isCctvVisible else isLightVisible
+    private fun updateMarkers(type: String) {
+        val isVisible = if (type == "CCTV") isCctvVisible else isLightVisible
         val activeMarkers = if (type == "CCTV") activeCctvMarkers else activeLightMarkers
+
         activeMarkers.forEach { it.map = null }
-        activeMarkers.clear() // 기존 마커 전부 지도에서 제거 + 목록 비움.
-        if (!isVisible || naverMap.cameraPosition.zoom < MIN_ZOOM_LEVEL) return // 숨김 상태/ 줌이 너무 작으면 여기서 종료함.
-        val bounds = naverMap.contentBounds  // 현재 지도 화면의 경계 좌표
+        activeMarkers.clear() // 기존 마커 싹 지우기
+
+        if (!isVisible || naverMap.cameraPosition.zoom < MIN_ZOOM_LEVEL) return
+
+        val bounds = naverMap.contentBounds
+
         lifecycleScope.launch {
-            val dataList = withContext(Dispatchers.IO) {
+            // 1. 기존 로컬(Room DB) 데이터 불러오기 (공공데이터)
+            val localDataList = withContext(Dispatchers.IO) {
                 AppDatabase.getDatabase(applicationContext).safetyDao()
                     .getSafetyInBounds(bounds.southWest.latitude, bounds.northEast.latitude,
                         bounds.southWest.longitude, bounds.northEast.longitude, type)
             }
+
             withContext(Dispatchers.Main) {
-                for (item in dataList) {
+                // 로컬 DB 마커 먼저 지도에 그리기
+                for (item in localDataList) {
                     val marker = Marker().apply {
                         position = LatLng(item.latitude, item.longitude)
-                        map      = naverMap
-                        icon     = OverlayImage.fromResource(if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight)
+                        map = naverMap
+                        icon = OverlayImage.fromResource(if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight)
                         width = 60; height = 60
                     }
                     activeMarkers.add(marker)
                 }
+
+                // 2. Firebase에서 승인된(APPROVED) 사용자 제보 데이터 불러오기
+                // 앱의 type은 "LIGHT"지만, 파이어베이스에는 "보안등"으로 저장했으므로 매핑.
+                val firestoreType = if (type == "CCTV") "CCTV" else "보안등"
+
+                FirebaseFirestore.getInstance().collection("reports")
+                    .whereEqualTo("status", "APPROVED") // 상태가 APPROVED인 것만!
+                    .whereEqualTo("type", firestoreType)
+                    .get()
+                    .addOnSuccessListener { documents ->
+                        for (document in documents) {
+                            val lat = document.getDouble("latitude") ?: continue
+                            val lng = document.getDouble("longitude") ?: continue
+
+                            // 현재 폰 화면(bounds) 안에 있는 제보 데이터만 마커로 찍기
+                            if (lat in bounds.southWest.latitude..bounds.northEast.latitude &&
+                                lng in bounds.southWest.longitude..bounds.northEast.longitude) {
+
+                                val marker = Marker().apply {
+                                    position = LatLng(lat, lng)
+                                    map = naverMap
+                                    icon = OverlayImage.fromResource(if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight)
+                                    width = 60; height = 60
+
+                                    // 사용자 제보 데이터라는 걸 티내기 위해 작은 글씨 추가
+                                    captionText = "사용자 제보"
+                                    captionTextSize = 10f
+                                    captionColor = Color.parseColor("#3D6BF5")
+                                    captionMinZoom = 15.0 // 지도를 좀 확대했을 때만 글씨 보이기
+                                }
+                                activeMarkers.add(marker)
+                            }
+                        }
+                    }
             }
         }
     }
