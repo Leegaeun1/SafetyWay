@@ -56,7 +56,7 @@ class SearchActivity : AppCompatActivity() {
         setContentView(R.layout.activity_search)
 
         // MainActivity에서 Intent로 넘겨준 현재 위치, 지역명 꺼냄.
-        searchApi = RetrofitClient.createSearchApi(this)
+        searchApi = RetrofitClient.createSearchApi()
         currentLat = intent.getDoubleExtra(EXTRA_CUR_LAT, 0.0)
         currentLng = intent.getDoubleExtra(EXTRA_CUR_LNG, 0.0)
         city = intent.getStringExtra(EXTRA_CITY)
@@ -164,7 +164,7 @@ class SearchActivity : AppCompatActivity() {
         // 역지오코딩. 
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching {
-                val mapApi = RetrofitClient.createMapApi(this@SearchActivity)
+                val mapApi = RetrofitClient.createMapApi()
                 val rg = mapApi.reverseGeocode("$lng,$lat")
                 val region = rg.results?.firstOrNull()?.region
                 withContext(Dispatchers.Main) {

@@ -18,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.naver.maps.geometry.LatLng
@@ -67,13 +68,16 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private var tempReportMarker: Marker? = null
     private var photoUri: Uri? = null
     private var photoFile: File? = null
-    data class RouteResult( // 경로 하나를 표현하는 데이터 클래스. 
-        val path: List<List<Double>>, // 좌표 목록
-        val distanceM: Int, // 거리(미터)
-        val durationSec: Int, // 시간(초)
-        val cctvCount: Int, // cctv 수
-        val lightCount: Int, // 보안등 수
-        val safetyScore: Int // 안전점수
+    private lateinit var auth: FirebaseAuth // 추가
+    data class RouteResult(
+        val path: List<List<Double>>,
+        val distanceM: Int,
+        val durationSec: Int,
+        val cctvCount: Int,
+        val lightCount: Int,
+        val safetyScore: Int,
+        val isDetour: Boolean = false,
+        var label: String = "" //️ 라벨을 자체적으로 기억하도록 변수 추가!
     )
 
     /**앱이 시작됐을 때 네이버 지도, 검색 API, 경로 매니저 세팅
@@ -81,10 +85,15 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
+        // Auth 인스턴스 초기화
+        auth = FirebaseAuth.getInstance()
+        android.util.Log.d("KeyTest", "네이버 맵 ID: ${BuildConfig.NAVER_MAP_CLIENT_ID}")
+        android.util.Log.d("KeyTest", "네이버 맵 시크릿: ${BuildConfig.NAVER_MAP_CLIENT_SECRET}")
+        // 앱이 시작될 때 익명 로그인 실행
+        signInAnonymously()
         locationSource = FusedLocationSource(this, LOCATION_PERMISSION_REQUEST_CODE) // 위치 소스 초기화.
-        searchApi = RetrofitClient.createSearchApi(this) // retrofit으로 네이버 검색 api 인스턴스 생성
-        mapApi    = RetrofitClient.createMapApi(this) // retrofit으로 네이버 지도 api 인스턴트 생성
+        searchApi = RetrofitClient.createSearchApi() // retrofit으로 네이버 검색 api 인스턴스 생성
+        mapApi    = RetrofitClient.createMapApi() // retrofit으로 네이버 지도 api 인스턴트 생성
         safeRouteManager = SafeRouteManager( // 로컬 DB와 지도 API를 주입해서 SafeRouteManager 생성!!
             safetyDao = AppDatabase.getDatabase(this).safetyDao(),
             mapApi    = mapApi
@@ -102,6 +111,20 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         setupMainSearchCard() // 메인 검색 카드 설정
         setupRouteInputCard() // 경로 입력 카드 설정
         setupDataSourceButton() // 데이터 출처 설정
+    }
+    private fun signInAnonymously() {
+        val currentUser = auth.currentUser
+        if (currentUser == null) {
+            auth.signInAnonymously()
+                .addOnCompleteListener(this) { task ->
+                    if (task.isSuccessful) {
+                        android.util.Log.d("SafetyWay", "파이어베이스 익명 로그인 성공")
+                    } else {
+                        android.util.Log.e("SafetyWay", "로그인 실패: ${task.exception}")
+                        Toast.makeText(this, "서버 연결에 실패했습니다.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+        }
     }
     @android.annotation.SuppressLint("MissingPermission") // 경고 무시
     private fun startLocationUpdates() { // GPS 업데이트.
@@ -361,51 +384,173 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     // 경로 탐색
     private fun findRoutes() { // 경로 탐색
         val goal = goalLatLng ?: return
-
-        // 출발지: 직접 선택했으면 그것, 아니면 현재위치
-        val start = startLatLng
-            ?: lastKnownLocation // GPS 위치
-            ?: naverMap.locationOverlay.position.takeIf { it.latitude != 0.0 } // 지도 위치 오버레이.
+        val start = startLatLng ?: lastKnownLocation ?: naverMap.locationOverlay.position.takeIf { it.latitude != 0.0 }
 
         if (start == null || start.latitude == 0.0) {
             Toast.makeText(this, "현재 위치를 확인 중입니다", Toast.LENGTH_SHORT).show()
             return
         }
-        clearPolylines() // 그려진거 초기화
+        clearPolylines() // 기존 선 초기화
 
         lifecycleScope.launch {
             try {
-                val scored = withContext(Dispatchers.IO) {
-                    safeRouteManager.findThreeRoutes(start, goal) // 3개 경로를 안전점수와 함께 계산함.
+                val offset = 50.0 / 111000.0 // 50m 반경 오차 범위
+
+                var detourRoute: RouteResult? = null // 우회 경로 결과
+                val baseResults = mutableListOf<RouteResult>() // 기본 경로 
+
+                // 출발지와 목적지 사이의 직선거리를 미터 단위로 계산
+                val straightDistM = distanceBetween(start.latitude, start.longitude, goal.latitude, goal.longitude)
+
+                // 거리가 200m 이하로 너무 짧으면 우회로 탐색 자체를 스킵 (바로 최단거리로 유도)
+                if (straightDistM > 200.0) {
+                    val midLat = (start.latitude + goal.latitude) / 2.0 // 출발지와 목적지 가운데
+                    val midLng = (start.longitude + goal.longitude) / 2.0
+
+                    // 원래 300m 고정이었던 반경을 전체 거리의 30% 수준으로 제한 (최대 300m)
+                    val dynamicSearchM = (straightDistM * 0.3).coerceAtMost(300.0)
+                    val searchOffset = dynamicSearchM / 111000.0 // 계산된 탐색 반경을 다시 위경도 좌표계 수치로 변환
+
+                    val nearbySafetyHubs = withContext(Dispatchers.IO) {
+                        AppDatabase.getDatabase(applicationContext).safetyDao()
+                            .getSafetyInBounds(midLat - searchOffset, midLat + searchOffset, midLng - searchOffset, midLng + searchOffset, "CCTV")
+                    }
+
+                    val safetyWaypoint = nearbySafetyHubs.firstOrNull()
+                    if (safetyWaypoint != null) {
+                        val passListStr = "${safetyWaypoint.longitude},${safetyWaypoint.latitude}"
+                        val detourTmap = withContext(Dispatchers.IO) {
+                            safeRouteManager.fetchTmapPedestrianRoute(this@MainActivity, start, goal, "0", passListStr)
+                        }
+                        if (detourTmap != null && detourTmap.path.isNotEmpty()) {
+                            detourRoute = calculateRouteScore(this@MainActivity, detourTmap, offset, isDetour = true)
+                        }
+                    }
                 }
-                if (scored.isEmpty()) { // 안전점수가 없을때
-                    Toast.makeText(this@MainActivity, "경로를 찾을 수 없습니다", Toast.LENGTH_SHORT).show()
+
+                // 기본 TMAP 탐색
+                val baseOptions = listOf("0", "10")
+                for (option in baseOptions) {
+                    val tmapResult = withContext(Dispatchers.IO) {
+                        safeRouteManager.fetchTmapPedestrianRoute(this@MainActivity, start, goal, option, null)
+                    }
+                    if (tmapResult != null && tmapResult.path.isNotEmpty()) {
+                        val baseRoute = calculateRouteScore(this@MainActivity, tmapResult, offset, isDetour = false)
+                        baseResults.add(baseRoute)
+                    }
+                }
+
+                if (baseResults.isEmpty() && detourRoute == null) {
+                    Toast.makeText(this@MainActivity, "도보 경로를 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
                     return@launch
                 }
 
-                val results = scored.map { sr -> // 결과를 MainActivity의 RouteResult형식으로 반환.
-                    RouteResult(
-                        path = sr.path,
-                        distanceM = sr.distanceM,
-                        durationSec = sr.durationMs / 1000,
-                        cctvCount = sr.cctvCount,
-                        lightCount = sr.lightCount,
-                        safetyScore = sr.safetyScore
-                    )
+                val safest = baseResults.maxByOrNull { it.safetyScore }
+                val shortest = baseResults.minByOrNull { it.distanceM }
+                val distSorted  = baseResults.sortedBy { it.distanceM }
+                val scoreSorted = baseResults.sortedByDescending { it.safetyScore }
+                val balanced = baseResults.minByOrNull { r -> distSorted.indexOf(r) + scoreSorted.indexOf(r) }
+
+                // 거리 대비 비효율적인 우회로 쳐내기
+                val validDetour = if (detourRoute != null && safest != null && shortest != null) {
+                    val isLessSafe = detourRoute.safetyScore <= safest.safetyScore
+                    // 최단 거리보다 1.5배 이상 멀면 아무리 안전해도 기각 (예: 100m -> 150m까지만 허용)
+                    val isTooFar = detourRoute.distanceM > shortest.distanceM * 1.5
+
+                    if (isLessSafe || isTooFar) null else detourRoute
+                } else {
+                    detourRoute
                 }
 
-                results.forEachIndexed { i, route -> // 첫번째 경로만 초록으로 굵게, 나머지는 회색 가늘게 그림.
+                // .copy()를 사용해 서로의 이름표가 꼬이지 않게 독립적인 객체로 묶어줌
+                val candidates = listOfNotNull(
+                    validDetour?.copy(label = "🛡 안전 우회 경로"),
+                    safest?.copy(label = "🛡 안전 추천"),
+                    balanced?.copy(label = "⚖ 안전+거리"),
+                    shortest?.copy(label = "⚡ 최단 거리")
+                )
+
+                // 기하학적으로 완전히 겹치는 경로의 라벨 진화 로직
+                val uniqueRoutes = mutableMapOf<List<List<Double>>, RouteResult>()
+
+                for (route in candidates) {
+                    val existing = uniqueRoutes[route.path]
+                    if (existing == null) {
+                        uniqueRoutes[route.path] = route
+                    } else {
+                        // 중복 경로인데, 하나는 제일 안전하고 하나는 제일 짧았다면 라벨을 합침
+                        if (existing.label == "🛡 안전 추천" && route.label == "⚡ 최단 거리") {
+                            existing.label = "🛡 최적 경로 (안전+최단)"
+                        }
+                    }
+                }
+
+                // 점수가 가장 높은 순서대로 최대 3개까지만 자르기
+                val results = uniqueRoutes.values.toList().sortedByDescending { it.safetyScore }.take(3)
+
+                // 지도에 선 그리기
+                results.forEachIndexed { i, route ->
                     drawPolyline(
                         path  = route.path,
                         color = if (i == 0) ROUTE_COLORS[0] else ROUTE_GRAY,
                         width = if (i == 0) 15 else 8
                     )
                 }
-                showRouteCards(results) // 경로 카드를 보여줌.
+
+                // 하단 결과 카드 UI 업데이트
+                showRouteCards(results)
+
             } catch (e: Exception) {
-                //Toast.makeText(this@MainActivity, "경로 탐색 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+                e.printStackTrace()
             }
         }
+    }
+
+    // 코루틴 비동기 처리를 위해 suspend를 붙이고, 내부에서 DB를 직접 열어 타입 에러를 방지
+    private suspend fun calculateRouteScore(
+        context: android.content.Context,
+        tmapResult: TmapRouteResponse,
+        offset: Double,
+        isDetour: Boolean
+    ): RouteResult = withContext(Dispatchers.IO) {
+        val localDb = AppDatabase.getDatabase(context).safetyDao()
+        val detectedCctvs = mutableSetOf<Pair<Double, Double>>()
+        val detectedLights = mutableSetOf<Pair<Double, Double>>()
+
+        for (coord in tmapResult.path) {
+            val lng = coord[0]
+            val lat = coord[1]
+
+            val nearbyCctv = localDb.getSafetyInBounds(lat - offset, lat + offset, lng - offset, lng + offset, "CCTV")
+            val nearbyLight = localDb.getSafetyInBounds(lat - offset, lat + offset, lng - offset, lng + offset, "LIGHT")
+
+            nearbyCctv.forEach { detectedCctvs.add(Pair(it.latitude, it.longitude)) }
+            nearbyLight.forEach { detectedLights.add(Pair(it.latitude, it.longitude)) }
+        }
+
+        val cctvCount = detectedCctvs.size
+        val lightCount = detectedLights.size
+
+        //  1. 원본 점수 계산
+        val rawScore = (cctvCount * 5) + (lightCount * 2)
+
+        //  2. 로그(log10)를 활용한 100점 만점 압축
+        // (예: rawScore가 10이면 41점, 50이면 68점, 300이면 99점, 그 이상은 100점으로 고정)
+        val safetyScore = if (rawScore > 0) {
+            (kotlin.math.log10(rawScore.toDouble() + 1.0) * 40).toInt().coerceIn(0, 100)
+        } else {
+            0
+        }
+
+        RouteResult(
+            path = tmapResult.path,
+            distanceM = tmapResult.distanceM,
+            durationSec = tmapResult.durationSec,
+            cctvCount = cctvCount,
+            lightCount = lightCount,
+            safetyScore = safetyScore,
+            isDetour = isDetour
+        )
     }
 
     private val ROUTE_COLORS = listOf( // 각각 다른 색상
@@ -432,15 +577,19 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         val lightIds = listOf(R.id.light_1, R.id.light_2, R.id.light_3)
         val scoreIds = listOf(R.id.score_1, R.id.score_2, R.id.score_3)
 
+        // 먼저 모든 카드를 숨김 처리
+        cardIds.forEach { findViewById<CardView>(it).visibility = View.GONE }
+
         fun applySelection(selected: Int) {
-            cardIds.forEachIndexed { i, cardId ->// 선택된 카드는 컬러배경
+            routes.forEachIndexed { i, route ->
+                if (i >= 3) return@forEachIndexed
                 val isSelected = i == selected
                 val routeColor = ROUTE_COLORS.getOrElse(i) { Color.parseColor("#3D6BF5") }
                 val bgColor   = if (isSelected) routeColor else Color.WHITE
                 val mainColor = if (isSelected) Color.WHITE else Color.BLACK
                 val subColor  = if (isSelected) Color.argb(200, 255, 255, 255) else Color.parseColor("#888888")
 
-                findViewById<CardView>(cardId).setCardBackgroundColor(bgColor)
+                findViewById<CardView>(cardIds[i]).setCardBackgroundColor(bgColor)
                 listOf(labelIds[i], timeIds[i]).forEach {
                     findViewById<TextView>(it).setTextColor(mainColor)
                 }
@@ -449,7 +598,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 }
                 findViewById<TextView>(scoreIds[i]).setTextColor(mainColor)
 
-                if (i < polylines.size) { // 지도에서 굵은선.
+                if (i < polylines.size) {
                     polylines[i].width = if (isSelected) 15 else 8
                     polylines[i].color = if (isSelected) routeColor else ROUTE_GRAY
                 }
@@ -458,21 +607,21 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
         routes.forEachIndexed { i, route ->
             if (i >= 3) return@forEachIndexed
-            val walkingMinutes = (route.distanceM / 65.0).toInt().coerceAtLeast(1) // 거리/65m = 도보시간.
-            val steps = (route.distanceM * 1.4).toInt() // 거리 x1.4 = 걸음 수
+
+            findViewById<CardView>(cardIds[i]).visibility = View.VISIBLE
+
+            val walkingMinutes = (route.distanceM / 65.0).toInt().coerceAtLeast(1)
+            val steps = (route.distanceM * 1.4).toInt()
             val km    = "%.1f".format(route.distanceM / 1000.0)
-            val label = when (i) {
-                0    -> "🛡 안전 추천"
-                1    -> "⚖ 안전+거리"
-                else -> "⚡ 최단거리"
-            }
+
+            val label = route.label
 
             findViewById<TextView>(labelIds[i]).text  = label
             findViewById<TextView>(timeIds[i]).text   = "${walkingMinutes}분"
             findViewById<TextView>(distIds[i]).text   = "${km}km · ${steps}걸음"
             findViewById<TextView>(cctvIds[i]).text   = "CCTV ${route.cctvCount}개"
             findViewById<TextView>(lightIds[i]).text  = "보안등 ${route.lightCount}개"
-            findViewById<TextView>(scoreIds[i]).text  = "안전점수 ${route.safetyScore}점"
+            findViewById<TextView>(scoreIds[i]).text  = "안전점수 ${route.safetyScore}점" // 로그가 적용된 100점 만점 점수!
 
             findViewById<CardView>(cardIds[i]).setOnClickListener {
                 selectedRouteIndex = i
@@ -563,10 +712,28 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
         // 지도 길게 누르기 이벤트 감지
         naverMap.setOnMapLongClickListener { point, latLng ->
-            // 1. 기존에 있던 임시 마커 지우기
-            tempReportMarker?.map = null
 
-            // 2. 길게 누른 위치에 임시 마커 찍기
+            // 1. 내 현재 GPS 위치 가져오기
+            val currentLoc = lastKnownLocation
+            if (currentLoc == null) {
+                Toast.makeText(this, "현재 위치를 확인 중입니다. 잠시 후 다시 시도해주세요.", Toast.LENGTH_SHORT).show()
+                return@setOnMapLongClickListener
+            }
+
+            // 2. 내 위치와 내가 길게 터치한 곳 사이의 거리 계산 (단위: 미터)
+            val distance = distanceBetween(
+                currentLoc.latitude, currentLoc.longitude,
+                latLng.latitude, latLng.longitude
+            )
+
+            // 3. 거리가 100m를 초과하면 제보 차단!
+            if (distance > 100.0) {
+                Toast.makeText(this, "현장에서만 제보할 수 있습니다.\n(현재 위치에서 ${distance.toInt()}m 떨어져 있음)", Toast.LENGTH_LONG).show()
+                return@setOnMapLongClickListener // 여기서 함수를 끝내버려서 팝업이 안 뜨게 함
+            }
+
+            // 4. 거리가 50m 이내라면 정상적으로 기존 로직 실행 (마커 찍고 팝업 띄우기)
+            tempReportMarker?.map = null
             tempReportMarker = Marker().apply {
                 position = latLng
                 map = naverMap
@@ -575,7 +742,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 captionText = "제보 위치"
             }
 
-            // 3. 하단 팝업(바텀 시트) 띄우기
             showReportBottomSheet(latLng)
         }
     }

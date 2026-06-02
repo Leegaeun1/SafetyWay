@@ -150,6 +150,15 @@
                 </LinearLayout>
             </LinearLayout>
         </androidx.cardview.widget.CardView>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="※ CCTV와 보안등을 제보해주시면 감사하겠습니다.\n원하는 곳의 위치를 꾹 눌러서 제보할 수있어요."
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#FF0000"
+            android:layout_marginBottom="20dp"/>
+
         <!-- 확인 버튼 -->
         <Button
             android:id="@+id/btn_dialog_confirms"
