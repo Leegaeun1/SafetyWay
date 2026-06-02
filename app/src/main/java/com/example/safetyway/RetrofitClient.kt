@@ -1,28 +1,30 @@
 package com.example.safetyway
 
-import android.content.Context
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 object RetrofitClient {
+    fun createTmapApi(): TmapSearchApi {
+        return Retrofit.Builder()
+            .baseUrl("https://apis.openapi.sk.com/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(TmapSearchApi::class.java)
+    }
 
-    fun createSearchApi(context: Context): NaverSearchApi {
+    fun createSearchApi(): NaverSearchApi {
         val interceptor = Interceptor { chain ->
             val request = chain.request().newBuilder()
-                .addHeader("X-Naver-Client-Id", context.getString(R.string.NAVER_SEARCH_CLIENT_ID))
-                .addHeader(
-                    "X-Naver-Client-Secret",
-                    context.getString(R.string.NAVER_SEARCH_CLIENT_SECRET)
-                )
+                // BuildConfig를 사용하여 숨겨둔 키를 불러옵니다.
+                .addHeader("X-Naver-Client-Id", BuildConfig.NAVER_SEARCH_CLIENT_ID)
+                .addHeader("X-Naver-Client-Secret", BuildConfig.NAVER_SEARCH_CLIENT_SECRET)
                 .build()
             chain.proceed(request)
         }
 
-        val client = OkHttpClient.Builder()
-            .addInterceptor(interceptor)
-            .build()
+        val client = OkHttpClient.Builder().addInterceptor(interceptor).build()
 
         return Retrofit.Builder()
             .baseUrl("https://openapi.naver.com/")
@@ -32,11 +34,11 @@ object RetrofitClient {
             .create(NaverSearchApi::class.java)
     }
 
-    fun createMapApi(context: Context): NaverMapApi {
+    fun createMapApi(): NaverMapApi {
         val interceptor = Interceptor { chain ->
             val request = chain.request().newBuilder()
-                .addHeader("X-NCP-APIGW-API-KEY-ID", context.getString(R.string.NAVER_MAP_CLIENT_ID))
-                .addHeader("X-NCP-APIGW-API-KEY", context.getString(R.string.NAVER_MAP_CLIENT_SECRET))
+                .addHeader("X-NCP-APIGW-API-KEY-ID", BuildConfig.NAVER_MAP_CLIENT_ID)
+                .addHeader("X-NCP-APIGW-API-KEY", BuildConfig.NAVER_MAP_CLIENT_SECRET)
                 .build()
             chain.proceed(request)
         }
