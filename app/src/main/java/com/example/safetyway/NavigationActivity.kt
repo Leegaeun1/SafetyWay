@@ -28,10 +28,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.pow
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -176,6 +172,8 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun stopSiren() {
+        // 만약 사이렌이 켜진 상태가 아니었다면, 아무것도 하지 않고 함수를 끝냅니다! (볼륨 0 되는 문제 해결 핵심)
+        if (!isSirenOn) return
         isSirenOn = false
 
         sirenPlayer?.apply {
@@ -193,6 +191,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                     device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
         }
         val streamType = if (isHeadsetConnected) AudioManager.STREAM_MUSIC else AudioManager.STREAM_ALARM
+        // 이전에 저장해둔 볼륨으로 안전하게 원상복구
         audioManager.setStreamVolume(streamType, savedVolume, 0)
     }
     override fun onMapReady(naverMap: NaverMap) {
@@ -447,6 +446,11 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         findViewById<TextView>(R.id.tv_direction).text = "🎉 목적지 도착!"
         currentPolyline?.map = null
         passedPolyline?.map = null
+        // 1. 사용자에게 안내 메시지 띄우기
+        android.widget.Toast.makeText(this, "목적지에 도착하여 안내를 종료합니다.", android.widget.Toast.LENGTH_LONG).show()
+
+        // 2. 현재 네비게이션 화면 종료 (자동으로 MainActivity로 돌아감)
+        finish()
     }
 
     private fun onOffRoute(current: LatLng) {
@@ -509,9 +513,10 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     private fun distanceBetween(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val dLat = Math.toRadians(lat2 - lat1)
         val dLng = Math.toRadians(lng2 - lng1)
-        val a = sin(dLat/2).pow(2) +
-                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLng/2).pow(2)
-        return 6371000 * 2 * atan2(sqrt(a), sqrt(1-a))
+        val a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLng/2) * Math.sin(dLng/2)
+        return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
