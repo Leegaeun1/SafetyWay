@@ -150,6 +150,15 @@
                 </LinearLayout>
             </LinearLayout>
         </androidx.cardview.widget.CardView>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="※ 경로는 도로 기준으로 안내되므로 \n실제 보행 시 횡단보도 및 보행 가능 여부를 확인하세요."
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#FF0000"
+            android:layout_marginBottom="20dp"/>
+
         <!-- 확인 버튼 -->
         <Button
             android:id="@+id/btn_dialog_confirms"

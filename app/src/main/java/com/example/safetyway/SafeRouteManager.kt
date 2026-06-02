@@ -99,7 +99,7 @@ class SafeRouteManager(
             for (item in allItems) {
                 val d = distanceBetween(sLat, sLng, item.latitude, item.longitude)
                 if (d > BUFFER_M) continue
-                if (item.type == "CCTV") cctvHit.add(item.id)
+                if (item.type == "CCTV") repeat(item.count.coerceAtMost(5)) { cctvHit.add(item.id) }
                 else lightHit.add(item.id)
             }
         }

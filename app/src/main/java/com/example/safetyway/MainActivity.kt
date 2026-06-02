@@ -383,7 +383,34 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                     return@launch
                 }
 
-                val results = scored.map { sr -> // 결과를 MainActivity의 RouteResult형식으로 반환.
+//                val results = scored.map { sr -> // 결과를 MainActivity의 RouteResult형식으로 반환.
+//                    RouteResult(
+//                        path = sr.path,
+//                        distanceM = sr.distanceM,
+//                        durationSec = sr.durationMs / 1000,
+//                        cctvCount = sr.cctvCount,
+//                        lightCount = sr.lightCount,
+//                        safetyScore = sr.safetyScore
+//                    )
+//                }
+
+                // 안전점수 highest -> 안전추천
+                val safest = scored.maxByOrNull { it.safetyScore }
+
+                // 거리 shortest -> 최단거리
+                val shortest = scored.minByOrNull { it.distanceM }
+
+                // 나머지 -> 안전+거리 (거리순위 + 점수순위 합산이 제일 낮은 것)
+                val distSorted  = scored.sortedBy { it.distanceM }
+                val scoreSorted = scored.sortedByDescending { it.safetyScore }
+                val balanced = scored.minByOrNull { sr ->
+                    distSorted.indexOf(sr) + scoreSorted.indexOf(sr)
+                }
+
+                // 세 경로 조합 (중복 제거)
+                val arranged = listOfNotNull(safest, balanced, shortest)
+
+                val results = arranged.map { sr ->
                     RouteResult(
                         path = sr.path,
                         distanceM = sr.distanceM,
