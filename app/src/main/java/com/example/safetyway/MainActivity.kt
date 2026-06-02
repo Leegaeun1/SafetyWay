@@ -590,10 +590,28 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
         // 지도 길게 누르기 이벤트 감지
         naverMap.setOnMapLongClickListener { point, latLng ->
-            // 1. 기존에 있던 임시 마커 지우기
-            tempReportMarker?.map = null
 
-            // 2. 길게 누른 위치에 임시 마커 찍기
+            // 1. 내 현재 GPS 위치 가져오기
+            val currentLoc = lastKnownLocation
+            if (currentLoc == null) {
+                Toast.makeText(this, "현재 위치를 확인 중입니다. 잠시 후 다시 시도해주세요.", Toast.LENGTH_SHORT).show()
+                return@setOnMapLongClickListener
+            }
+
+            // 2. 내 위치와 내가 길게 터치한 곳 사이의 거리 계산 (단위: 미터)
+            val distance = distanceBetween(
+                currentLoc.latitude, currentLoc.longitude,
+                latLng.latitude, latLng.longitude
+            )
+
+            // 3. 거리가 100m를 초과하면 제보 차단!
+            if (distance > 100.0) {
+                Toast.makeText(this, "현장에서만 제보할 수 있습니다.\n(현재 위치에서 ${distance.toInt()}m 떨어져 있음)", Toast.LENGTH_LONG).show()
+                return@setOnMapLongClickListener // 여기서 함수를 끝내버려서 팝업이 안 뜨게 함
+            }
+
+            // 4. 거리가 50m 이내라면 정상적으로 기존 로직 실행 (마커 찍고 팝업 띄우기)
+            tempReportMarker?.map = null
             tempReportMarker = Marker().apply {
                 position = latLng
                 map = naverMap
@@ -602,7 +620,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 captionText = "제보 위치"
             }
 
-            // 3. 하단 팝업(바텀 시트) 띄우기
             showReportBottomSheet(latLng)
         }
     }
