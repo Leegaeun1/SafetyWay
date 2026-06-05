@@ -75,7 +75,20 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         private const val OFF_ROUTE_DISTANCE = 50.0
         private const val WALK_SPEED_M_PER_MIN = 80.0  // 도보 약 4.8km/h (실제 체감 속도)
     }
+    // 클래스 맨 위 변수 선언하는 곳에 추가합니다.
+    private val locationReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            // NaviService가 쏴준 위치 정보를 받아서 업데이트 함수에 넘김!
+            val location = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                intent?.getParcelableExtra("location", Location::class.java)
+            } else {
+                intent?.getParcelableExtra("location")
+            } ?: return
 
+            val current = LatLng(location.latitude, location.longitude)
+            onLocationUpdate(current, location)
+        }
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_navigation)
@@ -120,6 +133,21 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             setOnClickListener {
                 startActivity(Intent(this@NavigationActivity, FakeCallActivity::class.java))
             }
+        }
+        // 1. 포그라운드 서비스(NaviService) 실행
+        val serviceIntent = Intent(this, NaviService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+
+        // 2. 서비스가 쏴주는 위치를 받을 방송 수신기(Receiver) 켜기
+        val filter = android.content.IntentFilter("com.example.safetyway.LOCATION_UPDATE")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(locationReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(locationReceiver, filter)
         }
     }
     // 비상 사이렌 버튼 설정
@@ -211,7 +239,6 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         }
 
         drawFullRoute()
-        startLocationTracking()
         setupNaviButtons()
 
         // 카메라 이동 완료 시 마커 업데이트 (디바운스 적용)
@@ -325,12 +352,6 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun startLocationTracking() {
-        naverMap.addOnLocationChangeListener { location ->
-            val current = LatLng(location.latitude, location.longitude)
-            onLocationUpdate(current, location)
-        }
-    }
 
     private fun onLocationUpdate(current: LatLng, location: Location) {
         // 1. 도착 여부 확인
@@ -462,6 +483,8 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onDestroy() {
         super.onDestroy()
         stopSiren()
+        unregisterReceiver(locationReceiver) // 방송 수신 끄기
+        stopService(Intent(this, NaviService::class.java)) // 포그라운드 알림 끄기
     }
     /**
      * 현재 위치 반경 CCTV_BLIND_SPOT_RADIUS(m) 안에 CCTV가 없으면 경고 카드 표시
