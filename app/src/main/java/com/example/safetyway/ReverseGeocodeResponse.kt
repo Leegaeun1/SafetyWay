@@ -13,7 +13,8 @@ data class RgStatus(
 
 data class RgResult(
     val name: String,
-    val region: RgRegion?
+    val region: RgRegion?,
+    val land: Land?
 )
 
 data class RgRegion(
@@ -26,4 +27,10 @@ data class RgRegion(
 
 data class RgArea(
     val name: String
+)
+data class Land(
+    val type: String?,
+    val name: String?,     // 도로명 (예: 진주대로)
+    val number1: String?,  // 건물 번호 본번 (예: 501)
+    val number2: String?   // 건물 번호 부번
 )

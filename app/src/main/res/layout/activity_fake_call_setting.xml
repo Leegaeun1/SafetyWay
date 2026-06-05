@@ -141,7 +141,7 @@
             android:id="@+id/et_sms_body"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="예: 지금 귀가 중이야. 곧 도착해! or 혼자 가고있어서 무서워서 그러는데 혹시 전화 걸어주실 수 있나요??"
+            android:hint="혼자 가고 있어서 무서워서 그러는데 혹시 전화 걸어주실 수 있나요??"
             android:inputType="textMultiLine"
             android:minLines="3"
             android:gravity="top"
