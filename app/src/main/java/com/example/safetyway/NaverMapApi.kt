@@ -10,7 +10,6 @@ interface NaverMapApi {
     suspend fun getCoordinates(
         @Query("query") address: String
     ): GeocodingResponse
-
     // Directions
     @GET("map-direction/v1/driving")
     suspend fun getRoute(
@@ -24,7 +23,7 @@ interface NaverMapApi {
     @GET("map-reversegeocode/v2/gc")
     suspend fun reverseGeocode(
         @Query("coords") coords: String,           // "경도,위도" 형식
-        @Query("orders") orders: String = "admcode",  // admcode = 행정구역
+        @Query("orders") orders: String = "roadaddr,addr,admcode",  // admcode = 행정구역
         @Query("output") output: String = "json"
     ): ReverseGeocodeResponse
 }

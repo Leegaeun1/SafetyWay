@@ -69,6 +69,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private var photoUri: Uri? = null
     private var photoFile: File? = null
     private lateinit var auth: FirebaseAuth // 추가
+    private var sirenPlayer: android.media.MediaPlayer? = null
+    private var isSirenOn = false
+    private lateinit var audioManager: android.media.AudioManager
+    private var savedVolume = 0
     data class RouteResult(
         val path: List<List<Double>>,
         val distanceM: Int,
@@ -92,6 +96,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         // 앱이 시작될 때 익명 로그인 실행
         signInAnonymously()
         locationSource = FusedLocationSource(this, LOCATION_PERMISSION_REQUEST_CODE) // 위치 소스 초기화.
+        audioManager = getSystemService(AUDIO_SERVICE) as android.media.AudioManager // 오디오 설정
         searchApi = RetrofitClient.createSearchApi() // retrofit으로 네이버 검색 api 인스턴스 생성
         mapApi    = RetrofitClient.createMapApi() // retrofit으로 네이버 지도 api 인스턴트 생성
         safeRouteManager = SafeRouteManager( // 로컬 DB와 지도 API를 주입해서 SafeRouteManager 생성!!
@@ -297,6 +302,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onDestroy() { // 화면 종료
         super.onDestroy()
         locationCallback?.let { fusedClient.removeLocationUpdates(it) } // GPS 업데이트 구독해제. 안하면 메모리 누수 + 배터리 낭비!
+        stopSiren()
     }
     // SearchActivity 결과 처리
     private val searchLauncher = registerForActivityResult( // SearchActivity를 열고 결과를 돌려받음.
@@ -710,6 +716,65 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 }
             }
         }
+        // 지도 짧게 터치 이벤트 감지 (출발지/목적지 설정)
+        naverMap.setOnMapClickListener { point, latLng ->
+            lifecycleScope.launch {
+                try {
+                    // 역지오코딩 요청 (도로명 주소 포함해서 달라고 API 설정이 되어있어야 함)
+                    val rg = withContext(Dispatchers.IO) {
+                        mapApi.reverseGeocode("${latLng.longitude},${latLng.latitude}")
+                    }
+
+                    val result = rg.results?.firstOrNull()
+
+                    // 1. 도로명 주소(roadaddr)나 지번 주소(addr)에서 정보 빼오기
+                    val land = result?.land
+                    val roadName = land?.name // 예: "진주대로"
+                    val bldNum = land?.number1 // 예: "501"
+
+                    // 2. 동 이름
+                    val dongName = result?.region?.area3?.name
+
+                    // 3. 도로명 주소가 있으면 우선 사용하고, 없으면 동 이름을 씁니다.
+                    val finalAddress = if (!roadName.isNullOrEmpty() && !bldNum.isNullOrEmpty()) {
+                        "$roadName $bldNum"
+                    } else {
+                        dongName ?: "선택한 위치"
+                    }
+
+                    // 사용자에게 팝업 띄우기
+                    val options = arrayOf("여기를 출발지로 설정", "여기를 목적지로 설정")
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                        .setTitle(finalAddress)
+                        .setItems(options) { _, which ->
+                            showRouteInputCard()
+
+                            when (which) {
+                                0 -> {
+                                    findViewById<android.widget.EditText>(R.id.start_input).setText(finalAddress)
+                                    startLatLng = latLng
+                                }
+                                1 -> {
+                                    findViewById<android.widget.EditText>(R.id.goal_input).setText(finalAddress)
+                                    goalLatLng = latLng
+                                }
+                            }
+
+                            if (startLatLng != null && goalLatLng != null) {
+                                findRoutes()
+                            } else if (which == 1 && startLatLng == null && lastKnownLocation != null) {
+                                startLatLng = lastKnownLocation
+                                findViewById<android.widget.EditText>(R.id.start_input).setText("현재 위치")
+                                findRoutes()
+                            }
+                        }
+                        .show()
+
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(this@MainActivity, "주소 정보를 불러올 수 없습니다.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
         // 지도 길게 누르기 이벤트 감지
         naverMap.setOnMapLongClickListener { point, latLng ->
 
@@ -797,6 +862,20 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             updateMarkers("LIGHT")
             streetlightBtn.setImageResource(if (isLightVisible) R.drawable.streetlight_no_see else R.drawable.streetlight_see)
         }
+        // 가짜 통화 실행 버튼
+        findViewById<ImageButton>(R.id.call_btn).setOnClickListener {
+            startActivity(Intent(this, FakeCallActivity::class.java))
+        }
+
+        // 비상 사이렌 버튼
+        val sosBtn = findViewById<ImageButton>(R.id.sos_btn)
+        sosBtn.setOnClickListener {
+            if (isSirenOn) stopSiren() else startSiren()
+            // 아이콘 토글
+            sosBtn.setImageResource(
+                if (isSirenOn) R.drawable.is_siren_off else R.drawable.is_siren_on
+            )
+        }
     }
 
     private fun updateMarkers(type: String) {
@@ -865,6 +944,59 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                     }
             }
         }
+    }
+    private fun startSiren() {
+        isSirenOn = true
+
+        val audioDevices = audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+        val isHeadsetConnected = audioDevices.any { device ->
+            device.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        }
+
+        val streamType = if (isHeadsetConnected) {
+            android.media.AudioManager.STREAM_MUSIC
+        } else {
+            android.media.AudioManager.STREAM_ALARM
+        }
+
+        val maxVolume = audioManager.getStreamMaxVolume(streamType)
+        savedVolume = audioManager.getStreamVolume(streamType)
+        val targetVolume = (maxVolume * 0.6f).toInt()
+        audioManager.setStreamVolume(streamType, targetVolume, 0)
+
+        try {
+            sirenPlayer = android.media.MediaPlayer.create(applicationContext, R.raw.scream).apply {
+                isLooping = true
+                start()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            isSirenOn = false
+        }
+    }
+
+    private fun stopSiren() {
+        if (!isSirenOn) return
+        isSirenOn = false
+
+        sirenPlayer?.apply {
+            if (isPlaying) stop()
+            release()
+        }
+        sirenPlayer = null
+
+        val audioDevices = audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+        val isHeadsetConnected = audioDevices.any { device ->
+            device.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+        }
+        val streamType = if (isHeadsetConnected) android.media.AudioManager.STREAM_MUSIC else android.media.AudioManager.STREAM_ALARM
+        audioManager.setStreamVolume(streamType, savedVolume, 0)
     }
     // 사용자가 위치 권한 허용/거부했을때 처리. 거부하면 위치 추적모드를 None으로함.
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {

@@ -47,8 +47,13 @@ class SearchActivity : AppCompatActivity() {
     private var city: String? = null
     private var dong: String? = null
     private lateinit var fusedLocationClient: com.google.android.gms.location.FusedLocationProviderClient // GPS 위치 가져옴
-
-    private var results: List<SearchItem> = emptyList() // 현재 검색 결과 목록.
+    data class SearchResultItem(
+        val name: String,
+        val address: String,
+        val lat: Double,
+        val lng: Double
+    )
+    private var results: List<SearchResultItem> = emptyList() // 현재 검색 결과 목록.
     private var searchJob: Job? = null // 실행중인 검색 코루틴. 새 검색이 시작되면 이전 걸 취소하기 위해 보관함.
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,16 +103,13 @@ class SearchActivity : AppCompatActivity() {
         // 리스트 아이템 클릭
         list.setOnItemClickListener { _, _, position, _ ->
             val item = results[position]
-            val name = item.title.replace(Regex("<[^>]*>"), "") // 정규식으로 태그 제거(HTML태그 포함해서 줘서)
-            val lat = item.mapy.toDouble() / 1e7 // 네이버 검색 API는 좌표를 정수로줘서 나눠줘야함.
-            val lng = item.mapx.toDouble() / 1e7
-            val data = Intent().apply { // 빈 Intent를 만들어서 결과 데이터를 담고 RESULT_OK와 함께 MainActivity로 돌려줌.
-                putExtra(RESULT_NAME, name)
-                putExtra(RESULT_LAT, lat)
-                putExtra(RESULT_LNG, lng)
+            val data = Intent().apply {
+                putExtra(RESULT_NAME, item.name)
+                putExtra(RESULT_LAT, item.lat)
+                putExtra(RESULT_LNG, item.lng)
             }
             setResult(Activity.RESULT_OK, data)
-            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager) // 키보드를 내리고 화면 닫기.
+            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
                 .hideSoftInputFromWindow(currentFocus?.windowToken, 0)
             finish()
         }
@@ -181,17 +183,15 @@ class SearchActivity : AppCompatActivity() {
 
     // 현재 결과 리스트를 거리순으로 재정렬만 함
     private fun reorderCurrentResults() {
-        if (results.isEmpty() || currentLat == 0.0) return // 결과가 없거나 위치 모르면 종료
+        if (results.isEmpty() || currentLat == 0.0) return
         val list = findViewById<ListView>(R.id.result_list)
         results = results.sortedBy {
-            distanceBetween(currentLat, currentLng, it.mapy.toDouble() / 1e7, it.mapx.toDouble() / 1e7)
-        } // 현재 위치 기준 가까운 순서로 정렬
+            distanceBetween(currentLat, currentLng, it.lat, it.lng)
+        }
         list.adapter?.let {
-            // 어댑터 그대로 notifyDataSetChanged로 순서만 갱신
             @Suppress("UNCHECKED_CAST")
-            (it as? ArrayAdapter<SearchItem>)?.notifyDataSetChanged()
+            (it as? ArrayAdapter<SearchResultItem>)?.notifyDataSetChanged()
         } ?: run {
-            // 어댑터가 없으면 (결과 있지만 아직 세팅 안 된 경우) 재세팅
             triggerSearch(findViewById<EditText>(R.id.search_input).text.toString())
         }
     }
@@ -203,11 +203,26 @@ class SearchActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun fetchSuggestions(query: String, list: ListView) { // 실제 검색
+    private suspend fun fetchSuggestions(query: String, list: ListView) {
         try {
-            // 지역 prefix 결정
-            // 우선순위: 동 이름 -> 시 이름 -> prefix 없음
-            // query에 이미 시/구 이름이 들어있으면 prefix 제거 (중복 방지)
+            val mapApi = RetrofitClient.createMapApi() // 지오코딩 API용
+
+            // 1. 지오코딩 (도로명/지번 주소) 검색
+            val geoResult = withContext(Dispatchers.IO) {
+                runCatching { mapApi.getCoordinates(query) }.getOrNull()
+            }
+
+            // 주소 검색 결과를 SearchResultItem 규격에 맞게 변환
+            val geoItems = geoResult?.addresses?.map { addr ->
+                SearchResultItem(
+                    name = addr.roadAddress.ifEmpty { addr.jibunAddress },
+                    address = addr.jibunAddress.ifEmpty { addr.roadAddress },
+                    lat = addr.y.toDoubleOrNull() ?: 0.0,
+                    lng = addr.x.toDoubleOrNull() ?: 0.0
+                )
+            } ?: emptyList()
+
+            // 2. 기존 지역명(POI) 검색 로직
             val localCity = city
             val localDong = dong
             val prefix = when {
@@ -217,49 +232,49 @@ class SearchActivity : AppCompatActivity() {
                 else -> "$localCity "
             }
 
-            val merged = withContext(Dispatchers.IO) {
+            val mergedLocal = withContext(Dispatchers.IO) {
                 if (prefix.isNotEmpty()) {
-                    // 지역 prefix 붙인 검색(8개) + 전국 검색(3개) 병합
-                    val local  = searchApi.searchPlace("$prefix$query", display = 8)
-                    val global = runCatching {
-                        searchApi.searchPlace(query, display = 3)
-                    }.getOrNull()
-                    (local.items + (global?.items ?: emptyList()))
-                        .distinctBy { "${it.mapx},${it.mapy}" }  // 좌표 기준 중복 제거
+                    val local = searchApi.searchPlace("$prefix$query", display = 8)
+                    val global = runCatching { searchApi.searchPlace(query, display = 3) }.getOrNull()
+                    (local.items + (global?.items ?: emptyList())).distinctBy { "${it.mapx},${it.mapy}" }
                 } else {
                     searchApi.searchPlace(query, display = 10).items
                 }
             }
+            val localItems = mergedLocal.map { item ->
+                SearchResultItem(
+                    name = item.title.replace(Regex("<[^>]*>"), ""),
+                    address = item.roadAddress.ifEmpty { item.address },
+                    lat = item.mapy.toDouble() / 1e7,
+                    lng = item.mapx.toDouble() / 1e7
+                )
+            }
 
-            // 현재위치 기준 거리순 정렬
+            // 3. 주소 결과와 상호명 결과를 합치고 중복 제거 (좌표 기준)
+            val combined = (geoItems + localItems).distinctBy { "${it.lat},${it.lng}" }
+
+            // 현재 위치 기준 거리순 정렬
             val sorted = if (currentLat != 0.0 && currentLng != 0.0) {
-                merged.sortedBy {
-                    val la = it.mapy.toDouble() / 1e7
-                    val ln = it.mapx.toDouble() / 1e7
-                    distanceBetween(currentLat, currentLng, la, ln)
-                }
-            } else merged
+                combined.sortedBy { distanceBetween(currentLat, currentLng, it.lat, it.lng) }
+            } else combined
 
             results = sorted
-
-            val adapter = object : ArrayAdapter<SearchItem>(
+            val adapter = object : ArrayAdapter<SearchResultItem>(
                 this@SearchActivity, R.layout.item_suggestion, sorted
             ) {
-                override fun getView(
-                    position: Int, convertView: View?, parent: android.view.ViewGroup
-                ): View {
-                    val v = convertView
-                        ?: layoutInflater.inflate(R.layout.item_suggestion, parent, false)
+                override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                    val v = convertView ?: layoutInflater.inflate(R.layout.item_suggestion, parent, false)
                     val item = sorted[position]
-                    val cleanName = item.title.replace(Regex("<[^>]*>"), "") // 장소명
-                    val address = item.roadAddress.ifEmpty { item.address } // 주소
-                    v.findViewById<TextView>(R.id.suggestion_name).text = cleanName
-                    v.findViewById<TextView>(R.id.suggestion_address).text = address
+
+                    v.findViewById<TextView>(R.id.suggestion_name).text = item.name
+                    v.findViewById<TextView>(R.id.suggestion_address).text = item.address
                     return v
                 }
             }
             list.adapter = adapter
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
     // 거리계산. 하버사인 공식. 6371000은 지구 반지름(미터)
     private fun distanceBetween(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
