@@ -103,6 +103,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             safetyDao = AppDatabase.getDatabase(this).safetyDao(),
             mapApi    = mapApi
         )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                androidx.core.app.ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 2000)
+            }
+        }
         fusedClient = com.google.android.gms.location.LocationServices // 초기화. GPS 업데이트 요청에 씀
             .getFusedLocationProviderClient(this)
 

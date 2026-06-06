@@ -113,6 +113,14 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                 )
             }
         }
+        // 화면이 켜지자마자 보여줄 '초기 남은 시간/거리'를 계산
+        val initialMin = (totalDistanceM / 65.0).toInt().coerceAtLeast(1)
+        val initialKm = "%.1f".format(totalDistanceM / 1000.0)
+        val initialSteps = (totalDistanceM * 1.4).toInt()
+
+        findViewById<TextView>(R.id.tv_remaining_time).text = "${initialMin}분"
+        findViewById<TextView>(R.id.tv_remaining_dist).text = "${initialKm}km"
+        findViewById<TextView>(R.id.tv_remaining_steps).text = "${initialSteps}걸음"
 
         locationSource = FusedLocationSource(this, LOCATION_PERMISSION_REQUEST_CODE)
 
