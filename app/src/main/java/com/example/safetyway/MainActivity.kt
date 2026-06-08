@@ -46,6 +46,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private var isLightVisible = false // 보안등이 보이는 상태인가
     private val activeCctvMarkers = mutableListOf<Marker>() // 현재 지도에 표시중인 CCTV 마커들 담아두는 목록임. 나중에 한번에 지우기위함
     private val activeLightMarkers = mutableListOf<Marker>() // 위와 같이 보안등 담아두는 목록.
+    private val activePoliceMarkers = mutableListOf<Marker>() // 파출소 마커 리스트
     private val MIN_ZOOM_LEVEL = 14.0 // 줌 레벨이 이것보다 낮으면 마커를 표시하지 X
 
     private lateinit var searchApi: NaverSearchApi // 장소 검색 api
@@ -83,7 +84,54 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         val isDetour: Boolean = false,
         var label: String = "" //️ 라벨을 자체적으로 기억하도록 변수 추가!
     )
+    // assets 폴더의 a.csv를 읽어서 Room DB에 넣는 함수
+    private fun loadPoliceDataOnce() {
+        val prefs = getSharedPreferences("safety_prefs", MODE_PRIVATE)
+        val isLoaded = prefs.getBoolean("is_police_loaded", false)
 
+        if (isLoaded) return // 이미 저장되어 있으면 스킵!
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val db = AppDatabase.getDatabase(applicationContext).safetyDao()
+                val inputStream = applicationContext.assets.open("a.csv")
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream))
+
+                reader.readLine() // 첫 줄(헤더) 건너뛰기
+                var line = reader.readLine()
+
+                while (line != null) {
+                    val tokens = line.split(",")
+                    if (tokens.size >= 3) {
+                        // 맨 뒤에서 첫 번째가 위도(Y), 두 번째가 경도(X)
+                        val latStr = tokens.last().trim()
+                        val lngStr = tokens[tokens.size - 2].trim()
+
+                        val latitude = latStr.toDoubleOrNull()
+                        val longitude = lngStr.toDoubleOrNull()
+
+                        if (latitude != null && longitude != null) {
+                            db.insert(SafetyEntity(
+                                latitude = latitude,
+                                longitude = longitude,
+                                type = "POLICE",
+                                count = 1
+                            ))
+                        }
+                    }
+                    line = reader.readLine()
+                }
+                reader.close()
+
+                // 완료 후 다신 실행 안 되게 저장
+                prefs.edit().putBoolean("is_police_loaded", true).apply()
+                android.util.Log.d("SafetyWay", "파출소 데이터 CSV -> DB 저장 완료!")
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
     /**앱이 시작됐을 때 네이버 지도, 검색 API, 경로 매니저 세팅
      * startLocationUpdates()로 GPS위치를 즉시 가져옴.*/
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -121,6 +169,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         setupMainSearchCard() // 메인 검색 카드 설정
         setupRouteInputCard() // 경로 입력 카드 설정
         setupDataSourceButton() // 데이터 출처 설정
+        loadPoliceDataOnce()
     }
     private fun signInAnonymously() {
         val currentUser = auth.currentUser
@@ -697,10 +746,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         naverMap.uiSettings.isZoomControlEnabled = false
         naverMap.locationTrackingMode = LocationTrackingMode.Follow // 카메라가 내 위치를 따라다니는 모드 설정
         setupButtonListeners()
-
+        updateMarkers("POLICE")
         naverMap.addOnCameraIdleListener { // 지도 카메라 이동이 멈출 때마다 현재 화면 범위에 맞게 마커 업데이트
             updateMarkers("CCTV")
             updateMarkers("LIGHT")
+            updateMarkers("POLICE")
         }
 
         // 위치 변경 시 lastKnownLocation 갱신 + 최초 1회 reverseGeocode
@@ -884,8 +934,20 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun updateMarkers(type: String) {
-        val isVisible = if (type == "CCTV") isCctvVisible else isLightVisible
-        val activeMarkers = if (type == "CCTV") activeCctvMarkers else activeLightMarkers
+        // 파출소는 버튼 없이 항상 보이게 true로 고정
+        val isVisible = when (type) {
+            "CCTV" -> isCctvVisible
+            "LIGHT" -> isLightVisible
+            "POLICE" -> true
+            else -> false
+        }
+
+        val activeMarkers = when (type) {
+            "CCTV" -> activeCctvMarkers
+            "LIGHT" -> activeLightMarkers
+            "POLICE" -> activePoliceMarkers
+            else -> return
+        }
 
         activeMarkers.forEach { it.map = null }
         activeMarkers.clear() // 기존 마커 싹 지우기
@@ -908,18 +970,27 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                     val marker = Marker().apply {
                         position = LatLng(item.latitude, item.longitude)
                         map = naverMap
-                        icon = OverlayImage.fromResource(if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight)
+                        icon = OverlayImage.fromResource(
+                            when (type) {
+                                "CCTV" -> R.drawable.cctv
+                                "LIGHT" -> R.drawable.streetlight
+                                "POLICE" -> R.drawable.police
+                                else -> R.drawable.cctv
+                            }
+                        )
                         width = 60; height = 60
                     }
                     activeMarkers.add(marker)
                 }
 
+                // 파출소는 파이어베이스 제보 데이터가 없으므로 여기서 바로 함수 종료
+                if (type == "POLICE") return@withContext
+
                 // 2. Firebase에서 승인된(APPROVED) 사용자 제보 데이터 불러오기
-                // 앱의 type은 "LIGHT"지만, 파이어베이스에는 "보안등"으로 저장했으므로 매핑.
                 val firestoreType = if (type == "CCTV") "CCTV" else "보안등"
 
                 FirebaseFirestore.getInstance().collection("reports")
-                    .whereEqualTo("status", "APPROVED") // 상태가 APPROVED인 것만!
+                    .whereEqualTo("status", "APPROVED")
                     .whereEqualTo("type", firestoreType)
                     .get()
                     .addOnSuccessListener { documents ->
@@ -927,7 +998,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                             val lat = document.getDouble("latitude") ?: continue
                             val lng = document.getDouble("longitude") ?: continue
 
-                            // 현재 폰 화면(bounds) 안에 있는 제보 데이터만 마커로 찍기
                             if (lat in bounds.southWest.latitude..bounds.northEast.latitude &&
                                 lng in bounds.southWest.longitude..bounds.northEast.longitude) {
 
@@ -937,11 +1007,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                                     icon = OverlayImage.fromResource(if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight)
                                     width = 60; height = 60
 
-                                    // 사용자 제보 데이터라는 걸 티내기 위해 작은 글씨 추가
                                     captionText = "사용자 제보"
                                     captionTextSize = 10f
                                     captionColor = Color.parseColor("#3D6BF5")
-                                    captionMinZoom = 15.0 // 지도를 좀 확대했을 때만 글씨 보이기
+                                    captionMinZoom = 15.0
                                 }
                                 activeMarkers.add(marker)
                             }

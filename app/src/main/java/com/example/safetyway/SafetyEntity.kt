@@ -14,5 +14,5 @@ data class SafetyEntity(
     val type: String,      // "CCTV" 또는 "LIGHT"
     val latitude: Double,
     val longitude: Double,
-    val count: Int         // 카메라 대수 또는 보안등 개수
+    val count: Int = 1         // 카메라 대수 또는 보안등 개수
 )
