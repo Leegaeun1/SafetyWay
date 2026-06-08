@@ -20,6 +20,8 @@ class NaviService : Service() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
+    // 이미 GPS 추적 중인지 확인하는 변수
+    private var isTracking = false
 
     override fun onCreate() {
         super.onCreate()
@@ -40,25 +42,27 @@ class NaviService : Service() {
         // 2. 포그라운드 서비스 시작
         startForeground(1, notification)
 
-        // 3. 백그라운드 GPS 추적 시작
-        startLocationUpdates()
+        // 아직 추적 중이 아닐 때만 GPS 추적을 시작합니다!
+        if (!isTracking) {
+            startLocationUpdates()
+            isTracking = true // 이제 추적 중이라고 깃발을 꽂음
+        }
 
         return START_STICKY
     }
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
+        // 기존 콜백이 있으면 한 번 지워줍니다.
+        if (::locationCallback.isInitialized) {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
+        }
+
         // 3초 간격으로 정확한 위치 요청
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L).build()
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                val location = result.lastLocation ?: return
-
-                // 찾은 위치를 NavigationActivity 쪽으로 방송
-                val broadcastIntent = Intent("com.example.safetyway.LOCATION_UPDATE")
-                broadcastIntent.putExtra("location", location)
-                sendBroadcast(broadcastIntent)
             }
         }
         fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
@@ -77,6 +81,7 @@ class NaviService : Service() {
         if (::locationCallback.isInitialized) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
+        isTracking = false // 서비스가 종료되면 깃발도 내림
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

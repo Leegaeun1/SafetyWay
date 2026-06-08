@@ -63,6 +63,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     private var isSirenOn = false
     private lateinit var audioManager: AudioManager
     private var savedVolume = 0  // 사이렌 종료 후 원래 볼륨으로 복원하기 위해 저장
+    private var lastPassedIndex = 0
     companion object {
         const val EXTRA_PATH_LAT = "path_lat"
         const val EXTRA_PATH_LNG = "path_lng"
@@ -75,19 +76,28 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         private const val OFF_ROUTE_DISTANCE = 50.0
         private const val WALK_SPEED_M_PER_MIN = 80.0  // 도보 약 4.8km/h (실제 체감 속도)
     }
-    // 클래스 맨 위 변수 선언하는 곳에 추가합니다.
-    private val locationReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-            // NaviService가 쏴준 위치 정보를 받아서 업데이트 함수에 넘김!
-            val location = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                intent?.getParcelableExtra("location", Location::class.java)
-            } else {
-                intent?.getParcelableExtra("location")
-            } ?: return
+    // TMAP 경로를 5m 간격으로 잘라주는 함수
+    private fun makeDensePath(path: List<LatLng>, intervalM: Double): List<LatLng> {
+        if (path.size < 2) return path
+        val densePath = mutableListOf<LatLng>()
+        densePath.add(path[0])
+        for (i in 0 until path.size - 1) {
+            val p1 = path[i]
+            val p2 = path[i+1]
+            val dist = distanceBetween(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
 
-            val current = LatLng(location.latitude, location.longitude)
-            onLocationUpdate(current, location)
+            if (dist > intervalM) {
+                val steps = (dist / intervalM).toInt()
+                for (j in 1..steps) {
+                    val fraction = j.toDouble() / (steps + 1.0)
+                    val lat = p1.latitude + (p2.latitude - p1.latitude) * fraction
+                    val lng = p1.longitude + (p2.longitude - p1.longitude) * fraction
+                    densePath.add(LatLng(lat, lng))
+                }
+            }
+            densePath.add(p2)
         }
+        return densePath
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,7 +111,8 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         goalLng = intent.getDoubleExtra(EXTRA_GOAL_LNG, 0.0)
         goalName = intent.getStringExtra(EXTRA_GOAL_NAME) ?: "목적지"
 
-        fullPath = lats.zip(lngs.toList()).map { (lat, lng) -> LatLng(lat, lng) }
+        val rawPath = lats.zip(lngs.toList()).map { (lat, lng) -> LatLng(lat, lng) }
+        fullPath = makeDensePath(rawPath, 5.0)
         remainingPath = fullPath.toMutableList()
         totalDistanceM = intent.getDoubleExtra(EXTRA_TOTAL_DISTANCE, 0.0)
         // totalDistanceM이 0이면 경로 좌표에서 직접 계산
@@ -113,6 +124,14 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                 )
             }
         }
+        // 화면이 켜지자마자 보여줄 '초기 남은 시간/거리'를 계산
+        val initialMin = (totalDistanceM / 65.0).toInt().coerceAtLeast(1)
+        val initialKm = "%.1f".format(totalDistanceM / 1000.0)
+        val initialSteps = (totalDistanceM * 1.4).toInt()
+
+        findViewById<TextView>(R.id.tv_remaining_time).text = "${initialMin}분"
+        findViewById<TextView>(R.id.tv_remaining_dist).text = "${initialKm}km"
+        findViewById<TextView>(R.id.tv_remaining_steps).text = "${initialSteps}걸음"
 
         locationSource = FusedLocationSource(this, LOCATION_PERMISSION_REQUEST_CODE)
 
@@ -140,14 +159,6 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             startForegroundService(serviceIntent)
         } else {
             startService(serviceIntent)
-        }
-
-        // 2. 서비스가 쏴주는 위치를 받을 방송 수신기(Receiver) 켜기
-        val filter = android.content.IntentFilter("com.example.safetyway.LOCATION_UPDATE")
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(locationReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(locationReceiver, filter)
         }
     }
     // 비상 사이렌 버튼 설정
@@ -237,7 +248,10 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             map = naverMap
             captionText = goalName
         }
-
+        naverMap.addOnLocationChangeListener { location ->
+            val current = LatLng(location.latitude, location.longitude)
+            onLocationUpdate(current, location)
+        }
         drawFullRoute()
         setupNaviButtons()
 
@@ -483,7 +497,6 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onDestroy() {
         super.onDestroy()
         stopSiren()
-        unregisterReceiver(locationReceiver) // 방송 수신 끄기
         stopService(Intent(this, NaviService::class.java)) // 포그라운드 알림 끄기
     }
     /**

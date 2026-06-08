@@ -1,13 +1,16 @@
 package com.example.safetyway
 
 import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
 @Dao
 interface SafetyDao {
     @Query("SELECT * FROM safety_info WHERE type = :type")
     suspend fun getItemsByType(type: String): List<SafetyEntity>
-
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(safety: SafetyEntity)
     @Query("""
         SELECT * FROM safety_info 
         WHERE (latitude BETWEEN :minLat AND :maxLat) 
