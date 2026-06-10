@@ -1,13 +1,20 @@
 package com.example.safetyway
 
+import android.widget.Toast
 import com.naver.maps.geometry.LatLng
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
-
+data class TmapRouteResponse(
+    val path: List<List<Double>>, // [경도, 위도] 좌표들의 모음
+    val distanceM: Int,           // 총 거리 (미터)
+    val durationSec: Int          // 총 소요 시간 (초)
+)
 class SafeRouteManager(
     private val safetyDao: SafetyDao,
     private val mapApi: NaverMapApi
@@ -74,6 +81,60 @@ class SafeRouteManager(
      */
     private data class PathMetrics(val score: Int, val cctv: Int, val light: Int)
 
+    suspend fun fetchTmapPedestrianRoute(
+        context: android.content.Context,
+        start: LatLng,
+        goal: LatLng,
+        searchOption: String,
+        passList: String? = null // 경유지 인자
+    ): TmapRouteResponse? {
+        val tmapApi = RetrofitClient.createTmapApi()
+        val apiKey = BuildConfig.TMAP_APP_KEY
+
+        val requestBody = TmapRouteRequest(
+            startX = start.longitude,
+            startY = start.latitude,
+            endX = goal.longitude,
+            endY = goal.latitude,
+            searchOption = searchOption, // 탐색 옵션
+            passList = passList // 티맵에 경유지 세팅
+        )
+
+        try {
+            val response: com.google.gson.JsonElement = tmapApi.getPedestrianRoute(appKey = apiKey, body = requestBody)
+            val jsonObject: com.google.gson.JsonObject = response.asJsonObject
+            val features: com.google.gson.JsonArray = jsonObject.getAsJsonArray("features") ?: return null
+
+            val firstFeature: com.google.gson.JsonObject = features.get(0).asJsonObject
+            val firstProps: com.google.gson.JsonObject = firstFeature.getAsJsonObject("properties")
+            val totalDistance = firstProps.get("totalDistance")?.asInt ?: 0
+            val totalTime = firstProps.get("totalTime")?.asInt ?: 0
+
+            val pathPoints = mutableListOf<List<Double>>()
+            for (i in 0 until features.size()) {
+                val feature: com.google.gson.JsonObject = features.get(i).asJsonObject
+                val geometry: com.google.gson.JsonObject = feature.getAsJsonObject("geometry")
+                val type = geometry.get("type").asString
+
+                if (type == "LineString") { // 선형 경로인것만 찾음.
+                    val coordinates: com.google.gson.JsonArray = geometry.getAsJsonArray("coordinates")
+                    for (j in 0 until coordinates.size()) {
+                        val coord: com.google.gson.JsonArray = coordinates.get(j).asJsonArray
+                        val lng = coord.get(0).asDouble
+                        val lat = coord.get(1).asDouble
+                        pathPoints.add(listOf(lng, lat)) // 경도, 위도
+                    }
+                }
+            }
+            return TmapRouteResponse(pathPoints, totalDistance, totalTime)
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "가까운 거리로 다시 테스트해보세요!", Toast.LENGTH_LONG).show()
+            }
+            e.printStackTrace()
+            return null
+        }
+    }
     private suspend fun calculatePathMetrics(path: List<List<Double>>): PathMetrics {
         if (path.size < 2) return PathMetrics(10, 0, 0)
 
@@ -99,7 +160,7 @@ class SafeRouteManager(
             for (item in allItems) {
                 val d = distanceBetween(sLat, sLng, item.latitude, item.longitude)
                 if (d > BUFFER_M) continue
-                if (item.type == "CCTV") cctvHit.add(item.id)
+                if (item.type == "CCTV") repeat(item.count.coerceAtMost(5)) { cctvHit.add(item.id) }
                 else lightHit.add(item.id)
             }
         }

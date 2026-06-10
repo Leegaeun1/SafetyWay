@@ -1,13 +1,24 @@
+import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp") version "2.0.21-1.0.28"
+    id("com.google.gms.google-services")
 }
-
+// local.properties 파일을 읽어오는 코드
+val properties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    properties.load(localPropertiesFile.inputStream())
+}
 android {
     namespace = "com.example.safetyway"
     compileSdk = 35
+    buildFeatures {
+        // 2. BuildConfig를 사용할 수 있게 활성화
+        buildConfig = true
+    }
     defaultConfig {
         applicationId = "com.example.safetyway"
         minSdk = 24
@@ -16,6 +27,14 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "NAVER_SEARCH_CLIENT_ID", "\"${properties.getProperty("NAVER_SEARCH_CLIENT_ID", "").toString().trim()}\"")
+        buildConfigField("String", "NAVER_SEARCH_CLIENT_SECRET", "\"${properties.getProperty("NAVER_SEARCH_CLIENT_SECRET", "").toString().trim()}\"")
+        buildConfigField("String", "NAVER_MAP_CLIENT_ID", "\"${properties.getProperty("NAVER_MAP_CLIENT_ID", "").toString().trim()}\"")
+        buildConfigField("String", "NAVER_MAP_CLIENT_SECRET", "\"${properties.getProperty("NAVER_MAP_CLIENT_SECRET", "").toString().trim()}\"")
+        buildConfigField("String", "TMAP_APP_KEY", "\"${properties.getProperty("TMAP_APP_KEY", "").toString().trim()}\"")
+
+// 매니페스트로 넘기는 값에도 trim() 추가!
+        manifestPlaceholders["NAVER_MAP_CLIENT_ID"] = properties.getProperty("NAVER_MAP_CLIENT_ID", "").toString().trim()
     }
 
     buildTypes {
@@ -83,5 +102,13 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.0.1")
     implementation("androidx.cardview:cardview:1.0.0")
     implementation("com.google.android.material:material:1.11.0")
+    // Firebase BoM (버전 관리용)
+    implementation(platform("com.google.firebase:firebase-bom:32.8.0"))
+    // Cloud Firestore (제보 텍스트/좌표 저장용)
+    implementation ("com.google.firebase:firebase-firestore")
 
+    // Firebase Storage (제보 이미지 파일 저장용)
+    implementation ("com.google.firebase:firebase-storage")
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-auth-ktx")
 }

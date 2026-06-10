@@ -6,10 +6,14 @@ import android.location.Location
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Bundle
+import android.view.View
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.cardview.widget.CardView
 import androidx.lifecycle.lifecycleScope
+import com.google.firebase.firestore.FirebaseFirestore
 import com.naver.maps.geometry.LatLng
 import com.naver.maps.map.LocationTrackingMode
 import com.naver.maps.map.MapFragment
@@ -24,10 +28,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.pow
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -51,6 +51,9 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private var isNaviCctvVisible = false
     private var isNaviLightVisible = false
+    // 사각지대 경고 상태
+    private var isBlindSpotWarningShown = false
+    private val CCTV_BLIND_SPOT_RADIUS = 150.0  // CCTV 없는 구간으로 판단할 반경(m)
     private val naviCctvMarkers = mutableListOf<Marker>()
     private val naviLightMarkers = mutableListOf<Marker>()
     private val MIN_ZOOM_LEVEL = 14.0
@@ -60,6 +63,7 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     private var isSirenOn = false
     private lateinit var audioManager: AudioManager
     private var savedVolume = 0  // 사이렌 종료 후 원래 볼륨으로 복원하기 위해 저장
+    private var lastPassedIndex = 0
     companion object {
         const val EXTRA_PATH_LAT = "path_lat"
         const val EXTRA_PATH_LNG = "path_lng"
@@ -72,7 +76,29 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         private const val OFF_ROUTE_DISTANCE = 50.0
         private const val WALK_SPEED_M_PER_MIN = 80.0  // 도보 약 4.8km/h (실제 체감 속도)
     }
+    // TMAP 경로를 5m 간격으로 잘라주는 함수
+    private fun makeDensePath(path: List<LatLng>, intervalM: Double): List<LatLng> {
+        if (path.size < 2) return path
+        val densePath = mutableListOf<LatLng>()
+        densePath.add(path[0])
+        for (i in 0 until path.size - 1) {
+            val p1 = path[i]
+            val p2 = path[i+1]
+            val dist = distanceBetween(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
 
+            if (dist > intervalM) {
+                val steps = (dist / intervalM).toInt()
+                for (j in 1..steps) {
+                    val fraction = j.toDouble() / (steps + 1.0)
+                    val lat = p1.latitude + (p2.latitude - p1.latitude) * fraction
+                    val lng = p1.longitude + (p2.longitude - p1.longitude) * fraction
+                    densePath.add(LatLng(lat, lng))
+                }
+            }
+            densePath.add(p2)
+        }
+        return densePath
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_navigation)
@@ -85,7 +111,8 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         goalLng = intent.getDoubleExtra(EXTRA_GOAL_LNG, 0.0)
         goalName = intent.getStringExtra(EXTRA_GOAL_NAME) ?: "목적지"
 
-        fullPath = lats.zip(lngs.toList()).map { (lat, lng) -> LatLng(lat, lng) }
+        val rawPath = lats.zip(lngs.toList()).map { (lat, lng) -> LatLng(lat, lng) }
+        fullPath = makeDensePath(rawPath, 5.0)
         remainingPath = fullPath.toMutableList()
         totalDistanceM = intent.getDoubleExtra(EXTRA_TOTAL_DISTANCE, 0.0)
         // totalDistanceM이 0이면 경로 좌표에서 직접 계산
@@ -97,6 +124,14 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                 )
             }
         }
+        // 화면이 켜지자마자 보여줄 '초기 남은 시간/거리'를 계산
+        val initialMin = (totalDistanceM / 65.0).toInt().coerceAtLeast(1)
+        val initialKm = "%.1f".format(totalDistanceM / 1000.0)
+        val initialSteps = (totalDistanceM * 1.4).toInt()
+
+        findViewById<TextView>(R.id.tv_remaining_time).text = "${initialMin}분"
+        findViewById<TextView>(R.id.tv_remaining_dist).text = "${initialKm}km"
+        findViewById<TextView>(R.id.tv_remaining_steps).text = "${initialSteps}걸음"
 
         locationSource = FusedLocationSource(this, LOCATION_PERMISSION_REQUEST_CODE)
 
@@ -117,6 +152,13 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             setOnClickListener {
                 startActivity(Intent(this@NavigationActivity, FakeCallActivity::class.java))
             }
+        }
+        // 1. 포그라운드 서비스(NaviService) 실행
+        val serviceIntent = Intent(this, NaviService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
         }
     }
     // 비상 사이렌 버튼 설정
@@ -169,6 +211,8 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun stopSiren() {
+        // 만약 사이렌이 켜진 상태가 아니었다면, 아무것도 하지 않고 함수를 끝냅니다! (볼륨 0 되는 문제 해결 핵심)
+        if (!isSirenOn) return
         isSirenOn = false
 
         sirenPlayer?.apply {
@@ -186,13 +230,14 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                     device.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
         }
         val streamType = if (isHeadsetConnected) AudioManager.STREAM_MUSIC else AudioManager.STREAM_ALARM
+        // 이전에 저장해둔 볼륨으로 안전하게 원상복구
         audioManager.setStreamVolume(streamType, savedVolume, 0)
     }
     override fun onMapReady(naverMap: NaverMap) {
         this.naverMap = naverMap
         naverMap.locationSource = locationSource
         naverMap.locationTrackingMode = LocationTrackingMode.Face
-
+        naverMap.uiSettings.isZoomControlEnabled = false
         // 위치 버튼 활성화 (동그란 버튼)
         naverMap.uiSettings.isLocationButtonEnabled = true
         naverMap.setContentPadding(0, 0, 0, 250)  // 하단 카드 높이만큼 패딩
@@ -203,9 +248,11 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             map = naverMap
             captionText = goalName
         }
-
+        naverMap.addOnLocationChangeListener { location ->
+            val current = LatLng(location.latitude, location.longitude)
+            onLocationUpdate(current, location)
+        }
         drawFullRoute()
-        startLocationTracking()
         setupNaviButtons()
 
         // 카메라 이동 완료 시 마커 업데이트 (디바운스 적용)
@@ -250,8 +297,10 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         if (!isVisible || naverMap.cameraPosition.zoom < MIN_ZOOM_LEVEL) return
 
         val bounds = naverMap.contentBounds
+
         lifecycleScope.launch {
-            val dataList = withContext(Dispatchers.IO) {
+            // 1. 공공데이터 불러오기
+            val localDataList = withContext(Dispatchers.IO) {
                 AppDatabase.getDatabase(applicationContext).safetyDao()
                     .getSafetyInBounds(
                         bounds.southWest.latitude, bounds.northEast.latitude,
@@ -259,19 +308,51 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                         type
                     )
             }
+
             withContext(Dispatchers.Main) {
-                for (item in dataList) {
+                // 로컬 마커 그리기
+                for (item in localDataList) {
                     val marker = Marker().apply {
                         position = LatLng(item.latitude, item.longitude)
                         map = naverMap
                         icon = OverlayImage.fromResource(
                             if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight
                         )
-                        width = 60
-                        height = 60
+                        width = 60; height = 60
                     }
                     activeMarkers.add(marker)
                 }
+
+                // 2. 파이어베이스 승인 제보 데이터 불러오기
+                val firestoreType = if (type == "CCTV") "CCTV" else "보안등"
+
+                FirebaseFirestore.getInstance().collection("reports")
+                    .whereEqualTo("status", "APPROVED")
+                    .whereEqualTo("type", firestoreType)
+                    .get()
+                    .addOnSuccessListener { documents ->
+                        for (document in documents) {
+                            val lat = document.getDouble("latitude") ?: continue
+                            val lng = document.getDouble("longitude") ?: continue
+
+                            // 화면 범위 필터링
+                            if (lat in bounds.southWest.latitude..bounds.northEast.latitude &&
+                                lng in bounds.southWest.longitude..bounds.northEast.longitude) {
+
+                                val marker = Marker().apply {
+                                    position = LatLng(lat, lng)
+                                    map = naverMap
+                                    icon = OverlayImage.fromResource(if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight)
+                                    width = 60; height = 60
+                                    captionText = "사용자 제보"
+                                    captionTextSize = 10f
+                                    captionColor = Color.parseColor("#3D6BF5")
+                                    captionMinZoom = 15.0
+                                }
+                                activeMarkers.add(marker)
+                            }
+                        }
+                    }
             }
         }
     }
@@ -285,12 +366,6 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private fun startLocationTracking() {
-        naverMap.addOnLocationChangeListener { location ->
-            val current = LatLng(location.latitude, location.longitude)
-            onLocationUpdate(current, location)
-        }
-    }
 
     private fun onLocationUpdate(current: LatLng, location: Location) {
         // 1. 도착 여부 확인
@@ -317,6 +392,9 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         if (distToRoute > OFF_ROUTE_DISTANCE) {
             onOffRoute(current)
         }
+
+        // 6. CCTV 사각지대 감지
+        checkBlindSpot(current)
 
         lastLocation = current
     }
@@ -403,6 +481,11 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
         findViewById<TextView>(R.id.tv_direction).text = "🎉 목적지 도착!"
         currentPolyline?.map = null
         passedPolyline?.map = null
+        // 1. 사용자에게 안내 메시지 띄우기
+        android.widget.Toast.makeText(this, "목적지에 도착하여 안내를 종료합니다.", android.widget.Toast.LENGTH_LONG).show()
+
+        // 2. 현재 네비게이션 화면 종료 (자동으로 MainActivity로 돌아감)
+        finish()
     }
 
     private fun onOffRoute(current: LatLng) {
@@ -414,13 +497,62 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onDestroy() {
         super.onDestroy()
         stopSiren()
+        stopService(Intent(this, NaviService::class.java)) // 포그라운드 알림 끄기
     }
+    /**
+     * 현재 위치 반경 CCTV_BLIND_SPOT_RADIUS(m) 안에 CCTV가 없으면 경고 카드 표시
+     * DB 조회는 IO 스레드에서, UI 업데이트는 Main 스레드에서 처리
+     */
+    private fun checkBlindSpot(current: LatLng) {
+        val warningCard = findViewById<CardView>(R.id.blind_spot_warning_card)
+        val tvDistance = findViewById<TextView>(R.id.tv_blind_spot_distance)
+        val ivIcon = findViewById<ImageView>(R.id.iv_blind_spot_icon)
+        ivIcon.setColorFilter(android.graphics.Color.parseColor("#FF6600"), android.graphics.PorterDuff.Mode.SRC_IN)
+
+        // 위도/경도 1도 ==> 111km -> 150m를 도 단위로 변환
+        val degreeOffset = CCTV_BLIND_SPOT_RADIUS / 111000.0
+
+        lifecycleScope.launch {
+            val nearbyCount = withContext(Dispatchers.IO) {
+                AppDatabase.getDatabase(applicationContext).safetyDao()
+                    .getSafetyInBounds(
+                        current.latitude - degreeOffset,
+                        current.latitude + degreeOffset,
+                        current.longitude - degreeOffset,
+                        current.longitude + degreeOffset,
+                        "CCTV"
+                    ).count { item ->
+                        // 실제 거리로 한 번 더 필터링 (사각형 쿼리 -> 원형 보정)
+                        distanceBetween(
+                            current.latitude, current.longitude,
+                            item.latitude, item.longitude
+                        ) <= CCTV_BLIND_SPOT_RADIUS
+                    }
+            }
+
+            withContext(Dispatchers.Main) {
+                val isBlindSpot = nearbyCount == 0
+                if (isBlindSpot && !isBlindSpotWarningShown) {
+                    // 사각지대 진입 -> 카드 표시
+                    tvDistance.text = "${CCTV_BLIND_SPOT_RADIUS.toInt()}m 이전까지 CCTV가 없습니다!"
+                    warningCard.visibility = View.VISIBLE
+                    isBlindSpotWarningShown = true
+                } else if (!isBlindSpot && isBlindSpotWarningShown) {
+                    // CCTV 범위 재진입 -> 카드 숨김
+                    warningCard.visibility = View.GONE
+                    isBlindSpotWarningShown = false
+                }
+            }
+        }
+    }
+
     private fun distanceBetween(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val dLat = Math.toRadians(lat2 - lat1)
         val dLng = Math.toRadians(lng2 - lng1)
-        val a = sin(dLat/2).pow(2) +
-                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLng/2).pow(2)
-        return 6371000 * 2 * atan2(sqrt(a), sqrt(1-a))
+        val a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLng/2) * Math.sin(dLng/2)
+        return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
