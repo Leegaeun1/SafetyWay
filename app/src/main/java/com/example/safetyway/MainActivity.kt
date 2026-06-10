@@ -74,6 +74,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private var isSirenOn = false
     private lateinit var audioManager: android.media.AudioManager
     private var savedVolume = 0
+    private val userReportedCctvs = mutableListOf<LatLng>()
+    private val userReportedLights = mutableListOf<LatLng>()
     data class RouteResult(
         val path: List<List<Double>>,
         val distanceM: Int,
@@ -170,6 +172,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         setupRouteInputCard() // 경로 입력 카드 설정
         setupDataSourceButton() // 데이터 출처 설정
         loadPoliceDataOnce()
+        loadUserReports()
     }
     private fun signInAnonymously() {
         val currentUser = auth.currentUser
@@ -219,6 +222,29 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
 
         fusedClient.requestLocationUpdates(req, locationCallback!!, mainLooper) // 실제로 GPS 업데이트 시작! 메인스레드에서 받음.
+    }
+    // 승인된 사용자 제보를 가져와서 메모리에 저장하는 함수
+    private fun loadUserReports() {
+        FirebaseFirestore.getInstance().collection("reports")
+            .whereEqualTo("status", "APPROVED")
+            .get()
+            .addOnSuccessListener { documents ->
+                userReportedCctvs.clear()
+                userReportedLights.clear()
+
+                for (document in documents) {
+                    val lat = document.getDouble("latitude") ?: continue
+                    val lng = document.getDouble("longitude") ?: continue
+                    val type = document.getString("type") ?: continue
+
+                    if (type == "CCTV") {
+                        userReportedCctvs.add(LatLng(lat, lng))
+                    } else if (type == "보안등") {
+                        userReportedLights.add(LatLng(lat, lng))
+                    }
+                }
+                android.util.Log.d("SafetyWay", "사용자 제보 로드 완료: CCTV ${userReportedCctvs.size}개, 보안등 ${userReportedLights.size}개")
+            }
     }
     private fun createImageFile(): File {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -586,6 +612,18 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
             nearbyCctv.forEach { detectedCctvs.add(Pair(it.latitude, it.longitude)) }
             nearbyLight.forEach { detectedLights.add(Pair(it.latitude, it.longitude)) }
+            // 2. 사용자 제보 데이터 (파이어베이스) 반경 검사 추가
+            for (report in userReportedCctvs) {
+                // 경로 상의 점과 제보 위치 사이의 거리가 50m(오차범위) 이내라면 점수 획득!
+                if (distanceBetween(lat, lng, report.latitude, report.longitude) <= 50.0) {
+                    detectedCctvs.add(Pair(report.latitude, report.longitude))
+                }
+            }
+            for (report in userReportedLights) {
+                if (distanceBetween(lat, lng, report.latitude, report.longitude) <= 50.0) {
+                    detectedLights.add(Pair(report.latitude, report.longitude))
+                }
+            }
         }
 
         val cctvCount = detectedCctvs.size
