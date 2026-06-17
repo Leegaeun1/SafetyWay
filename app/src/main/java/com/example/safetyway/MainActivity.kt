@@ -488,7 +488,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 // 출발지와 목적지 사이의 직선거리를 미터 단위로 계산
                 val straightDistM = distanceBetween(start.latitude, start.longitude, goal.latitude, goal.longitude)
 
-                // 거리가 200m 이하로 너무 짧으면 우회로 탐색 자체를 스킵 (바로 최단거리로 유도)
+                // findRoutes() 내부의 우회 경로 생성 로직 업그레이드 버전
                 if (straightDistM > 200.0) {
                     val midLat = (start.latitude + goal.latitude) / 2.0 // 출발지와 목적지 가운데
                     val midLng = (start.longitude + goal.longitude) / 2.0
@@ -497,19 +497,78 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                     val dynamicSearchM = (straightDistM * 0.3).coerceAtMost(300.0)
                     val searchOffset = dynamicSearchM / 111000.0 // 계산된 탐색 반경을 다시 위경도 좌표계 수치로 변환
 
+                    // 1. 주변 CCTV 데이터 조회
                     val nearbySafetyHubs = withContext(Dispatchers.IO) {
                         AppDatabase.getDatabase(applicationContext).safetyDao()
                             .getSafetyInBounds(midLat - searchOffset, midLat + searchOffset, midLng - searchOffset, midLng + searchOffset, "CCTV")
                     }
 
-                    val safetyWaypoint = nearbySafetyHubs.firstOrNull()
-                    if (safetyWaypoint != null) {
-                        val passListStr = "${safetyWaypoint.longitude},${safetyWaypoint.latitude}"
-                        val detourTmap = withContext(Dispatchers.IO) {
-                            safeRouteManager.fetchTmapPedestrianRoute(this@MainActivity, start, goal, "0", passListStr)
-                        }
-                        if (detourTmap != null && detourTmap.path.isNotEmpty()) {
-                            detourRoute = calculateRouteScore(this@MainActivity, detourTmap, offset, isDetour = true)
+                    // 2. 발견된 안전지점들을 최대 5개씩 쪼개기 (예: 8개면 5개 / 3개로 분할)
+                    // TMAP 보행자 경유지 제한이 5개이므로, 링크 노드 역할을 고려해 4개씩 자르는 것이 안전.
+                    val chunks = nearbySafetyHubs.chunked(4)
+
+                    if (chunks.isNotEmpty()) {
+                        val combinedPath = mutableListOf<List<Double>>()
+                        var totalDistance = 0
+                        var totalDuration = 0
+
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            try {
+                                // 뒤에 !!를 붙여서 명시적으로 LatLng 타입으로 만든다.
+                                var currentStart: LatLng = start!!
+
+                                for (i in chunks.indices) {
+                                    val currentChunk = chunks[i]
+
+                                    // 마지막 조각이면 최종 목적지, 아니면 해당 조각의 마지막 CCTV를 임시 목적지로 설정
+                                    val currentGoal = if (i == chunks.size - 1) {
+                                        goal
+                                    } else {
+                                        val lastHub = currentChunk.last()
+                                        LatLng(lastHub.latitude, lastHub.longitude)
+                                    }
+
+                                    // 경유지 세팅
+                                    val passWaypoints = if (i == chunks.size - 1) currentChunk else currentChunk.dropLast(1)
+                                    val passListStr = if (passWaypoints.isNotEmpty()) {
+                                        passWaypoints.joinToString("_") { "${it.longitude},${it.latitude}" }
+                                    } else null
+
+                                    // TMAP API 호출
+                                    val response = safeRouteManager.fetchTmapPedestrianRoute(
+                                        this@MainActivity, currentStart, currentGoal, "0", passListStr
+                                    )
+
+                                    if (response != null && response.path.isNotEmpty()) {
+                                        // 중복 좌표 제거하면서 경로 이어붙이기
+                                        if (combinedPath.isEmpty()) {
+                                            combinedPath.addAll(response.path)
+                                        } else {
+                                            combinedPath.addAll(response.path.drop(1))
+                                        }
+
+                                        totalDistance += response.distanceM
+                                        totalDuration += response.durationSec
+                                    }
+
+                                    // 다음 루프를 위해 출발지점을 현재의 임시 목적지점으로 교체!
+                                    currentStart = currentGoal
+                                }
+
+                                // 모든 경로 조각 병합 완료 후 처리
+                                if (combinedPath.isNotEmpty()) {
+                                    withContext(Dispatchers.Main) {
+                                        val fakeResponse = TmapRouteResponse(
+                                            path = combinedPath,
+                                            distanceM = totalDistance,
+                                            durationSec = totalDuration
+                                        )
+                                        detourRoute = calculateRouteScore(this@MainActivity, fakeResponse, offset, isDetour = true)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
                         }
                     }
                 }
