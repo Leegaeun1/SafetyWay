@@ -11,7 +11,6 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.HorizontalScrollView
-import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -86,6 +85,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private var savedVolume = 0
     private val userReportedCctvs = mutableListOf<LatLng>()
     private val userReportedLights = mutableListOf<LatLng>()
+    private var isInfraVisible = false          // 인프라 탭 토글
+    private val activeInfraMarkers = mutableListOf<Marker>()  // 인프라 마커 목록
+    private var _previewCard:  androidx.cardview.widget.CardView? = null
+    private var _previewImage: android.widget.ImageView? = null
     data class RouteResult(
         val path: List<List<Double>>,
         val distanceM: Int,
@@ -183,7 +186,6 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         startLocationUpdates() // GPS 업데이트 시작
         setupMainSearchCard() // 메인 검색 카드 설정
         setupRouteInputCard() // 경로 입력 카드 설정
-        setupDataSourceButton() // 데이터 출처 설정
         loadPoliceDataOnce()
         loadUserReports()
     }
@@ -346,28 +348,31 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             super.onBackPressed()
         }
     }
-    private fun setupDataSourceButton() {
-        findViewById<ImageButton>(R.id.btn_data_source).setOnClickListener {
-            val dialogView = layoutInflater.inflate(R.layout.dialog_data_source, null)
-
-            val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
-                .setView(dialogView)
-                .create()
-            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-
-            dialogView.findViewById<android.widget.Button>(R.id.btn_dialog_confirms)
-                .setOnClickListener { dialog.dismiss() }
-            dialog.show()
-        }
-    }
     private val takePhotoLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            // 사진 촬영 성공 시, photoUri에 이미지 데이터가 담겨 있음
-            Toast.makeText(this, "사진이 촬영되었습니다!", Toast.LENGTH_SHORT).show()
+            val uri = photoUri
+            if (uri != null && _previewImage != null && _previewCard != null) {
+                // Glide 없이 ContentResolver로 비트맵 로드
+                try {
+                    val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        android.graphics.ImageDecoder.decodeBitmap(
+                            android.graphics.ImageDecoder.createSource(contentResolver, uri)
+                        )
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.provider.MediaStore.Images.Media.getBitmap(contentResolver, uri)
+                    }
+                    _previewImage!!.setImageBitmap(bitmap)
+                    _previewCard!!.visibility = View.VISIBLE
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            android.widget.Toast.makeText(this, "사진이 촬영되었습니다!", android.widget.Toast.LENGTH_SHORT).show()
         } else {
-            photoUri = null
+            photoUri  = null
             photoFile = null
         }
     }
@@ -375,6 +380,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         // 카드 전환
         findViewById<CardView>(R.id.route_input_card).visibility = View.GONE
         findViewById<CardView>(R.id.main_search_card).visibility = View.VISIBLE
+        // 필터 탭을 top_search_row 아래로 복원
+        val filterScroll = findViewById<android.widget.HorizontalScrollView>(R.id.filter_tab_scroll)
+        val params = filterScroll.layoutParams as android.widget.RelativeLayout.LayoutParams
+        params.removeRule(android.widget.RelativeLayout.BELOW)
+        params.addRule(android.widget.RelativeLayout.BELOW, R.id.top_search_row)
+        filterScroll.layoutParams = params
 
         // 경로/마커/상태 초기화
         clearPolylines()
@@ -447,7 +458,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
     // 메인 검색 카드 (어디로 갈까요?)
     private fun setupMainSearchCard() {
-        findViewById<CardView>(R.id.main_search_card).setOnClickListener {
+        // 검색 카드 클릭
+        findViewById<androidx.cardview.widget.CardView>(R.id.main_search_card).setOnClickListener {
             openSearchFor("goal")
         }
     }
@@ -456,6 +468,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private fun showRouteInputCard() {
         findViewById<CardView>(R.id.main_search_card).visibility = View.GONE
         findViewById<CardView>(R.id.route_input_card).visibility = View.VISIBLE
+        val filterScroll = findViewById<android.widget.HorizontalScrollView>(R.id.filter_tab_scroll)
+        val params = filterScroll.layoutParams as android.widget.RelativeLayout.LayoutParams
+        params.removeRule(android.widget.RelativeLayout.BELOW)
+        params.addRule(android.widget.RelativeLayout.BELOW, R.id.route_input_card)
+        filterScroll.layoutParams = params
     }
 
     // 출발지/목적지 EditText 클릭 -> SearchActivity
@@ -808,11 +825,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         naverMap.uiSettings.isZoomControlEnabled = false
         naverMap.locationTrackingMode = LocationTrackingMode.Follow // 카메라가 내 위치를 따라다니는 모드 설정
         setupButtonListeners()
-        updateMarkers("POLICE")
-        naverMap.addOnCameraIdleListener { // 지도 카메라 이동이 멈출 때마다 현재 화면 범위에 맞게 마커 업데이트
+        naverMap.addOnCameraIdleListener {
             updateMarkers("CCTV")
             updateMarkers("LIGHT")
-            updateMarkers("POLICE")
+            updateMarkers("INFRA") // 수정: 지도 이동 후 갱신할 때
         }
 
         // 위치 변경 시 lastKnownLocation 갱신 + 최초 1회 reverseGeocode
@@ -932,82 +948,137 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         val view = layoutInflater.inflate(R.layout.bottom_sheet_report, null)
         bottomSheetDialog.setContentView(view)
 
-        // 다이얼로그가 닫힐 때 임시 마커도 같이 지도에서 지워주기
         bottomSheetDialog.setOnDismissListener {
             tempReportMarker?.map = null
         }
 
-        // 위치 텍스트 뷰 업데이트 (역 지오코딩으로 주소를 가져올 수도 있지만, 일단 위경도로 표시)
-        val tvAddress = view.findViewById<TextView>(R.id.tv_report_address)
+        val tvAddress    = view.findViewById<android.widget.TextView>(R.id.tv_report_address)
+        val rgType       = view.findViewById<android.widget.RadioGroup>(R.id.rg_infrastructure_type)
+        val btnTakePhoto = view.findViewById<android.widget.Button>(R.id.btn_take_photo)
+        val btnSubmit    = view.findViewById<android.widget.Button>(R.id.btn_submit_report)
+        val cardPreview  = view.findViewById<androidx.cardview.widget.CardView>(R.id.card_photo_preview)
+        val ivPreview    = view.findViewById<android.widget.ImageView>(R.id.iv_photo_preview)
+        val btnRetake    = view.findViewById<android.widget.ImageView>(R.id.btn_retake_photo)
+
         tvAddress.text = "좌표: ${String.format("%.4f", latLng.latitude)}, ${String.format("%.4f", latLng.longitude)}"
 
-        // 뷰 내부의 버튼들 가져오기
-        val rgType = view.findViewById<android.widget.RadioGroup>(R.id.rg_infrastructure_type)
-        val btnTakePhoto = view.findViewById<Button>(R.id.btn_take_photo)
-        val btnSubmit = view.findViewById<Button>(R.id.btn_submit_report)
-
-        // 카메라 버튼 클릭 이벤트
+        // 사진 촬영
         btnTakePhoto.setOnClickListener {
-            dispatchTakePictureIntent() // 카메라 켜기
+            dispatchTakePictureIntent()
         }
 
-        // 제보하기 버튼 클릭 이벤트
+        // 다시 찍기 (× 버튼)
+        btnRetake.setOnClickListener {
+            photoUri  = null
+            photoFile = null
+            cardPreview.visibility = View.GONE
+            btnTakePhoto.text = "📷 현장 사진 촬영 (필수)"
+        }
+
+        // takePhotoLauncher 결과를 BottomSheet 안 ImageView에도 반영해야 하므로
+        // currentBottomSheetViews 에 저장해 공유
+        _previewCard  = cardPreview
+        _previewImage = ivPreview
+
+        // 제보하기
         btnSubmit.setOnClickListener {
             val selectedType = if (rgType.checkedRadioButtonId == R.id.rb_cctv) "CCTV" else "보안등"
-
-            // 파이어베이스 업로드 실행
             uploadReport(latLng, selectedType)
-
             bottomSheetDialog.dismiss()
         }
 
         bottomSheetDialog.show()
     }
-    private fun setupButtonListeners() { // CCTV와 보안등 보기, 통화 설정 버튼
-        findViewById<ImageButton>(R.id.btn_fake_call_setting).setOnClickListener {
+    private fun setupButtonListeners() {
+        val activeColor  = Color.parseColor("#3D6BF5")
+        val sosColor     = Color.parseColor("#E53935")
+        val defaultColor = Color.parseColor("#444444")
+
+        // ── 설정 버튼 (검색창 오른쪽) ──
+        findViewById<View>(R.id.btn_fake_call_setting).setOnClickListener {
             startActivity(Intent(this, FakeCallSettingActivity::class.java))
         }
-        val cctvBtn        = findViewById<ImageButton>(R.id.cctv_btn)
-        val streetlightBtn = findViewById<ImageButton>(R.id.streetlight_btn)
-        cctvBtn.setOnClickListener {
+
+        // ── 필터 탭: CCTV ──
+        val tabCctv      = findViewById<View>(R.id.tab_cctv)
+        val tabCctvIcon  = findViewById<android.widget.ImageView>(R.id.tab_cctv_icon)
+        val tabCctvLabel = findViewById<android.widget.TextView>(R.id.tab_cctv_label)
+        tabCctv.setOnClickListener {
             isCctvVisible = !isCctvVisible
             updateMarkers("CCTV")
-            cctvBtn.setImageResource(if (isCctvVisible) R.drawable.cctv_no_see else R.drawable.cctv_see)
+            applyTabState(tabCctv, tabCctvIcon, tabCctvLabel, isCctvVisible)
         }
-        streetlightBtn.setOnClickListener {
+
+        // ── 필터 탭: 보안등 ──
+        val tabLight      = findViewById<View>(R.id.tab_streetlight)
+        val tabLightIcon  = findViewById<android.widget.ImageView>(R.id.tab_streetlight_icon)
+        val tabLightLabel = findViewById<android.widget.TextView>(R.id.tab_streetlight_label)
+        tabLight.setOnClickListener {
             isLightVisible = !isLightVisible
             updateMarkers("LIGHT")
-            streetlightBtn.setImageResource(if (isLightVisible) R.drawable.streetlight_no_see else R.drawable.streetlight_see)
+            applyTabState(tabLight, tabLightIcon, tabLightLabel, isLightVisible)
         }
-        // 가짜 통화 실행 버튼
-        findViewById<ImageButton>(R.id.call_btn).setOnClickListener {
+
+        // ── 필터 탭: 인프라 ──
+        val tabInfra      = findViewById<View>(R.id.tab_infra)
+        val tabInfraIcon  = findViewById<android.widget.ImageView>(R.id.tab_infra_icon)
+        val tabInfraLabel = findViewById<android.widget.TextView>(R.id.tab_infra_label)
+        tabInfra.setOnClickListener {
+            isInfraVisible = !isInfraVisible
+            updateMarkers("INFRA")   // 현재 POLICE 타입이 인프라(경찰서 등). 추후 편의점/소방서 확장 시 분기
+            applyTabState(tabInfra, tabInfraIcon, tabInfraLabel, isInfraVisible)
+        }
+
+        // ── 비상벨 ──
+        val sosItem  = findViewById<View>(R.id.btn_sos_item)
+        val sosIcon  = findViewById<android.widget.ImageView>(R.id.sos_btn)
+        val sosLabel = findViewById<android.widget.TextView>(R.id.sos_label)
+        sosItem.setOnClickListener {
+            if (isSirenOn) stopSiren() else startSiren()
+            val c = if (isSirenOn) sosColor else defaultColor
+            sosIcon.setColorFilter(c)
+            sosLabel.setTextColor(c)
+        }
+
+        // ── 가짜전화 ──
+        findViewById<View>(R.id.call_btn).setOnClickListener {
             startActivity(Intent(this, FakeCallActivity::class.java))
         }
 
-        // 비상 사이렌 버튼
-        val sosBtn = findViewById<ImageButton>(R.id.sos_btn)
-        sosBtn.setOnClickListener {
-            if (isSirenOn) stopSiren() else startSiren()
-            // 아이콘 토글
-            sosBtn.setImageResource(
-                if (isSirenOn) R.drawable.is_siren_off else R.drawable.is_siren_on
-            )
+        // ── 사진촬영 버튼 (UI만, 기능은 추후 구현) ──
+        findViewById<View>(R.id.btn_photo_item).setOnClickListener {
+            android.widget.Toast.makeText(this, "사진 촬영 기능은 준비 중입니다.", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
-
+    private fun applyTabState(
+        tab: View,
+        icon: android.widget.ImageView,
+        label: android.widget.TextView,
+        isActive: Boolean
+    ) {
+        if (isActive) {
+            tab.setBackgroundResource(R.drawable.bg_filter_tab_active)
+            icon.setColorFilter(Color.WHITE)
+            label.setTextColor(Color.WHITE)
+        } else {
+            tab.setBackgroundResource(R.drawable.bg_filter_tab_default)
+            icon.setColorFilter(Color.parseColor("#666666"))
+            label.setTextColor(Color.parseColor("#666666"))
+        }
+    }
     private fun updateMarkers(type: String) {
         // 파출소는 버튼 없이 항상 보이게 true로 고정
         val isVisible = when (type) {
             "CCTV" -> isCctvVisible
             "LIGHT" -> isLightVisible
-            "POLICE" -> true
+            "INFRA" -> isInfraVisible
             else -> false
         }
 
         val activeMarkers = when (type) {
             "CCTV" -> activeCctvMarkers
             "LIGHT" -> activeLightMarkers
-            "POLICE" -> activePoliceMarkers
+            "INFRA" -> activeInfraMarkers
             else -> return
         }
 
@@ -1019,11 +1090,19 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         val bounds = naverMap.contentBounds
 
         lifecycleScope.launch {
-            // 1. 기존 로컬(Room DB) 데이터 불러오기 (공공데이터)
+            // 1. 기존 로컬(Room DB) 데이터 불러오기
             val localDataList = withContext(Dispatchers.IO) {
-                AppDatabase.getDatabase(applicationContext).safetyDao()
-                    .getSafetyInBounds(bounds.southWest.latitude, bounds.northEast.latitude,
-                        bounds.southWest.longitude, bounds.northEast.longitude, type)
+                val dao = AppDatabase.getDatabase(applicationContext).safetyDao()
+
+                if (type == "INFRA") {
+                    val policeList = dao.getSafetyInBounds(bounds.southWest.latitude, bounds.northEast.latitude, bounds.southWest.longitude, bounds.northEast.longitude, "POLICE")
+                    val fireList = dao.getSafetyInBounds(bounds.southWest.latitude, bounds.northEast.latitude, bounds.southWest.longitude, bounds.northEast.longitude, "FIRE")
+                    val storeList = dao.getSafetyInBounds(bounds.southWest.latitude, bounds.northEast.latitude, bounds.southWest.longitude, bounds.northEast.longitude, "STORE")
+                    policeList + fireList + storeList
+                } else {
+                    // CCTV나 LIGHT일 경우
+                    dao.getSafetyInBounds(bounds.southWest.latitude, bounds.northEast.latitude, bounds.southWest.longitude, bounds.northEast.longitude, type)
+                }
             }
 
             withContext(Dispatchers.Main) {
@@ -1032,11 +1111,14 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                     val marker = Marker().apply {
                         position = LatLng(item.latitude, item.longitude)
                         map = naverMap
+                        // DB에 저장된 item.type을 기준으로 아이콘을 다르게 설정합니다.
                         icon = OverlayImage.fromResource(
-                            when (type) {
+                            when (item.type) {
                                 "CCTV" -> R.drawable.cctv
                                 "LIGHT" -> R.drawable.streetlight
                                 "POLICE" -> R.drawable.police
+                                "FIRE" -> R.drawable.fire    // 소방서 아이콘
+                                "STORE" -> R.drawable.store  // 편의점 아이콘
                                 else -> R.drawable.cctv
                             }
                         )
@@ -1045,10 +1127,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                     activeMarkers.add(marker)
                 }
 
-                // 파출소는 파이어베이스 제보 데이터가 없으므로 여기서 바로 함수 종료
-                if (type == "POLICE") return@withContext
+                // 인프라는 파이어베이스 제보 데이터가 없으므로 여기서 바로 함수 종료
+                if (type == "INFRA") return@withContext
 
-                // 2. Firebase에서 승인된(APPROVED) 사용자 제보 데이터 불러오기
+                // 2. Firebase에서 승인된 사용자 제보 데이터 불러오기 (CCTV, LIGHT 전용)
                 val firestoreType = if (type == "CCTV") "CCTV" else "보안등"
 
                 FirebaseFirestore.getInstance().collection("reports")

@@ -51,11 +51,13 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private var isNaviCctvVisible = false
     private var isNaviLightVisible = false
+    private var isNaviInfraVisible = false
     // 사각지대 경고 상태
     private var isBlindSpotWarningShown = false
     private val CCTV_BLIND_SPOT_RADIUS = 150.0  // CCTV 없는 구간으로 판단할 반경(m)
     private val naviCctvMarkers = mutableListOf<Marker>()
     private val naviLightMarkers = mutableListOf<Marker>()
+    private val naviPoliceMarkers = mutableListOf<Marker>()
     private val MIN_ZOOM_LEVEL = 14.0
 
     // 비상 사이렌
@@ -147,11 +149,11 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
             finish()
         }
         setupSirenButton()
-        findViewById<ImageButton>(R.id.call_btn).apply {
-            // 가짜 통화 바로 실행
-            setOnClickListener {
-                startActivity(Intent(this@NavigationActivity, FakeCallActivity::class.java))
-            }
+        findViewById<android.widget.LinearLayout>(R.id.call_btn).setOnClickListener {
+            startActivity(Intent(this@NavigationActivity, FakeCallActivity::class.java))
+        }
+        findViewById<android.widget.LinearLayout>(R.id.btn_photo_item).setOnClickListener {
+            android.widget.Toast.makeText(this, "사진 촬영 기능은 준비 중입니다.", android.widget.Toast.LENGTH_SHORT).show()
         }
         // 1. 포그라운드 서비스(NaviService) 실행
         val serviceIntent = Intent(this, NaviService::class.java)
@@ -163,13 +165,17 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
     }
     // 비상 사이렌 버튼 설정
     private fun setupSirenButton() {
-        val sosBtn = findViewById<ImageButton>(R.id.sos_btn)
-        sosBtn.setOnClickListener {
+        val sosLayout = findViewById<android.widget.LinearLayout>(R.id.sos_btn)
+        val sosIcon   = findViewById<ImageView>(R.id.sos_icon)
+        val sosLabel  = findViewById<TextView>(R.id.sos_label)
+        val sosColor     = Color.parseColor("#E53935")
+        val defaultColor = Color.parseColor("#444444")
+
+        sosLayout.setOnClickListener {
             if (isSirenOn) stopSiren() else startSiren()
-            // 아이콘 토글 (활성/비활성 상태 구분)
-            sosBtn.setImageResource(
-                if (isSirenOn) R.drawable.is_siren_off else R.drawable.is_siren_on
-            )
+            val c = if (isSirenOn) sosColor else defaultColor
+            sosIcon.setColorFilter(c)
+            sosLabel.setTextColor(c)
         }
     }
     private fun startSiren() {
@@ -263,33 +269,72 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                 delay(300)  // 0.3초 후 업데이트 (회전 중 과도한 갱신 방지)
                 updateNaviMarkers("CCTV")
                 updateNaviMarkers("LIGHT")
+                updateNaviMarkers("POLICE")
             }
         }
     }
     private fun setupNaviButtons() {
-        val cctvBtn = findViewById<ImageButton>(R.id.navi_cctv_btn)
-        val lightBtn = findViewById<ImageButton>(R.id.navi_streetlight_btn)
-
-        cctvBtn.setOnClickListener {
+        // ── CCTV 탭 ──
+        val tabCctv      = findViewById<View>(R.id.navi_tab_cctv)
+        val tabCctvIcon  = findViewById<ImageView>(R.id.navi_tab_cctv_icon)
+        val tabCctvLabel = findViewById<TextView>(R.id.navi_tab_cctv_label)
+        tabCctv.setOnClickListener {
             isNaviCctvVisible = !isNaviCctvVisible
             updateNaviMarkers("CCTV")
-            cctvBtn.setImageResource(
-                if (isNaviCctvVisible) R.drawable.cctv_no_see else R.drawable.cctv_see
-            )
+            applyNaviTabState(tabCctv, tabCctvIcon, tabCctvLabel, isNaviCctvVisible)
         }
 
-        lightBtn.setOnClickListener {
+        // ── 보안등 탭 ──
+        val tabLight      = findViewById<View>(R.id.navi_tab_streetlight)
+        val tabLightIcon  = findViewById<ImageView>(R.id.navi_tab_streetlight_icon)
+        val tabLightLabel = findViewById<TextView>(R.id.navi_tab_streetlight_label)
+        tabLight.setOnClickListener {
             isNaviLightVisible = !isNaviLightVisible
             updateNaviMarkers("LIGHT")
-            lightBtn.setImageResource(
-                if (isNaviLightVisible) R.drawable.streetlight_no_see else R.drawable.streetlight_see
-            )
+            applyNaviTabState(tabLight, tabLightIcon, tabLightLabel, isNaviLightVisible)
+        }
+
+        // ── 인프라 탭 ──
+        val tabInfra      = findViewById<View>(R.id.navi_tab_infra)
+        val tabInfraIcon  = findViewById<ImageView>(R.id.navi_tab_infra_icon)
+        val tabInfraLabel = findViewById<TextView>(R.id.navi_tab_infra_label)
+        tabInfra.setOnClickListener {
+            isNaviInfraVisible = !isNaviInfraVisible
+            updateNaviMarkers("POLICE")
+            applyNaviTabState(tabInfra, tabInfraIcon, tabInfraLabel, isNaviInfraVisible)
+        }
+    }
+
+    private fun applyNaviTabState(
+        tab: View,
+        icon: ImageView,
+        label: TextView,
+        isActive: Boolean
+    ) {
+        if (isActive) {
+            tab.setBackgroundResource(R.drawable.bg_filter_tab_active)
+            icon.setColorFilter(Color.WHITE)
+            label.setTextColor(Color.WHITE)
+        } else {
+            tab.setBackgroundResource(R.drawable.bg_filter_tab_default)
+            icon.setColorFilter(Color.parseColor("#666666"))
+            label.setTextColor(Color.parseColor("#666666"))
         }
     }
 
     private fun updateNaviMarkers(type: String) {
-        val isVisible = if (type == "CCTV") isNaviCctvVisible else isNaviLightVisible
-        val activeMarkers = if (type == "CCTV") naviCctvMarkers else naviLightMarkers
+        val isVisible = when (type) {
+            "CCTV"   -> isNaviCctvVisible
+            "LIGHT"  -> isNaviLightVisible
+            "POLICE" -> isNaviInfraVisible
+            else     -> false
+        }
+        val activeMarkers = when (type) {
+            "CCTV"   -> naviCctvMarkers
+            "LIGHT"  -> naviLightMarkers
+            "POLICE" -> naviPoliceMarkers
+            else     -> return
+        }
 
         activeMarkers.forEach { it.map = null }
         activeMarkers.clear()
@@ -316,14 +361,18 @@ class NavigationActivity : AppCompatActivity(), OnMapReadyCallback {
                         position = LatLng(item.latitude, item.longitude)
                         map = naverMap
                         icon = OverlayImage.fromResource(
-                            if (type == "CCTV") R.drawable.cctv else R.drawable.streetlight
+                            when (type) {
+                                "CCTV"   -> R.drawable.cctv
+                                "LIGHT"  -> R.drawable.streetlight
+                                "POLICE" -> R.drawable.police
+                                else     -> R.drawable.cctv
+                            }
                         )
                         width = 60; height = 60
                     }
                     activeMarkers.add(marker)
                 }
-
-                // 2. 파이어베이스 승인 제보 데이터 불러오기
+                if (type == "POLICE") return@withContext
                 val firestoreType = if (type == "CCTV") "CCTV" else "보안등"
 
                 FirebaseFirestore.getInstance().collection("reports")

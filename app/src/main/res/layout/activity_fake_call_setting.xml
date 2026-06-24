@@ -270,7 +270,14 @@
                 android:text="11초 ｢알겠어, 조심히 와｣"
                 android:textColor="#CCCCCC" android:textSize="13sp" android:fontFamily="monospace"/>
         </LinearLayout>
-
+        <Button
+            android:id="@+id/btn_data_source_in_setting"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="📊 데이터 출처 보기"
+            android:backgroundTint="#F5F7FF"
+            android:textColor="#3D6BF5"
+            android:textStyle="bold"/>
         <!-- 저장 버튼 -->
         <Button
             android:id="@+id/btn_save_setting"

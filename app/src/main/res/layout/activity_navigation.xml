@@ -47,45 +47,111 @@
         </LinearLayout>
     </androidx.cardview.widget.CardView>
 
-    <!-- 오른쪽 버튼들 (CCTV, 보안등, SOS, 가짜통화) -->
-    <LinearLayout
+    <!-- ===== 오른쪽 버튼 카드: 비상벨 / 가짜전화 / 사진촬영 ===== -->
+    <androidx.cardview.widget.CardView
         android:id="@+id/navi_overlay_buttons"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_alignParentEnd="true"
-        android:layout_marginTop="120dp"
-        android:orientation="vertical">
-        <ImageButton
-            android:id="@+id/navi_cctv_btn"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:background="@null"
-            android:scaleType="fitCenter"
-            android:src="@drawable/cctv_see"/>
-        <ImageButton
-            android:id="@+id/navi_streetlight_btn"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:background="@null"
-            android:scaleType="fitCenter"
-            android:src="@drawable/streetlight_see"/>
-        <ImageButton
-            android:id="@+id/sos_btn"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:background="@null"
-            android:scaleType="fitCenter"
-            android:src="@drawable/is_siren_on"/>
-        <ImageButton
-            android:id="@+id/call_btn"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:background="@null"
-            android:scaleType="fitCenter"
-            android:src="@drawable/fake_call"/>
-    </LinearLayout>
+        android:layout_below="@id/direction_card"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="8dp"
+        app:cardCornerRadius="18dp"
+        app:cardElevation="6dp"
+        app:cardBackgroundColor="@android:color/white">
 
-    <!-- 하단 정보 카드 -->
+        <LinearLayout
+            android:layout_width="66dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- 비상벨 (SOS) -->
+            <LinearLayout
+                android:id="@+id/sos_btn"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:paddingVertical="11dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@null">
+                <ImageView
+                    android:id="@+id/sos_icon"
+                    android:layout_width="25dp"
+                    android:layout_height="25dp"
+                    android:src="@drawable/ic_nav_light"
+                    app:tint="#444444"/>
+                <TextView
+                    android:id="@+id/sos_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="비상벨"
+                    android:textSize="11sp"
+                    android:textColor="#444444"
+                    android:layout_marginTop="3dp"/>
+            </LinearLayout>
+
+            <View android:layout_width="42dp" android:layout_height="1dp"
+                android:layout_gravity="center" android:background="#EEEEEE"/>
+
+            <!-- 가짜전화 -->
+            <LinearLayout
+                android:id="@+id/call_btn"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:paddingVertical="11dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@null">
+                <ImageView
+                    android:layout_width="25dp"
+                    android:layout_height="25dp"
+                    android:src="@drawable/ic_nav_call"
+                    app:tint="#444444"/>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="가짜전화"
+                    android:textSize="11sp"
+                    android:textColor="#444444"
+                    android:layout_marginTop="3dp"/>
+            </LinearLayout>
+
+            <View android:layout_width="42dp" android:layout_height="1dp"
+                android:layout_gravity="center" android:background="#EEEEEE"/>
+
+            <!-- 사진촬영 -->
+            <LinearLayout
+                android:id="@+id/btn_photo_item"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:paddingVertical="11dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@null">
+                <ImageView
+                    android:layout_width="25dp"
+                    android:layout_height="25dp"
+                    android:src="@android:drawable/ic_menu_camera"
+                    app:tint="#444444"/>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="사진촬영"
+                    android:textSize="11sp"
+                    android:textColor="#444444"
+                    android:layout_marginTop="3dp"/>
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <!-- ===== 하단 정보 카드 (시간/거리/걸음) ===== -->
     <androidx.cardview.widget.CardView
         android:id="@+id/bottom_info_card"
         android:layout_width="match_parent"
@@ -187,14 +253,12 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:padding="14dp">
-            <!-- 경고 아이콘 -->
             <ImageView
                 android:layout_width="36dp"
                 android:layout_height="36dp"
                 android:id="@+id/iv_blind_spot_icon"
                 android:src="@android:drawable/ic_dialog_alert"
                 android:layout_marginEnd="12dp"/>
-            <!-- 텍스트 영역 -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -218,5 +282,109 @@
             </LinearLayout>
         </LinearLayout>
     </androidx.cardview.widget.CardView>
+
+    <!-- ===== 필터 탭 (CCTV / 보안등 / 인프라) ===== -->
+    <HorizontalScrollView
+        android:id="@+id/navi_filter_tab_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/direction_card"
+        android:layout_marginBottom="8dp"
+        android:layout_marginHorizontal="12dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <!-- CCTV 탭 -->
+            <LinearLayout
+                android:id="@+id/navi_tab_cctv"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="14dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_filter_tab_default"
+                android:clickable="true"
+                android:focusable="true">
+                <ImageView
+                    android:id="@+id/navi_tab_cctv_icon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_nav_cctv"
+                    android:layout_marginEnd="5dp"
+                    app:tint="#666666"/>
+                <TextView
+                    android:id="@+id/navi_tab_cctv_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="CCTV"
+                    android:textSize="13sp"
+                    android:textColor="#666666"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+
+            <!-- 보안등 탭 -->
+            <LinearLayout
+                android:id="@+id/navi_tab_streetlight"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="14dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_filter_tab_default"
+                android:clickable="true"
+                android:focusable="true">
+                <ImageView
+                    android:id="@+id/navi_tab_streetlight_icon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_nav_light"
+                    android:layout_marginEnd="5dp"
+                    app:tint="#666666"/>
+                <TextView
+                    android:id="@+id/navi_tab_streetlight_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="보안등"
+                    android:textSize="13sp"
+                    android:textColor="#666666"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+
+            <!-- 인프라 탭 -->
+            <LinearLayout
+                android:id="@+id/navi_tab_infra"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="14dp"
+                android:background="@drawable/bg_filter_tab_default"
+                android:clickable="true"
+                android:focusable="true">
+                <ImageView
+                    android:id="@+id/navi_tab_infra_icon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:src="@drawable/ic_nav_layers"
+                    android:layout_marginEnd="5dp"
+                    app:tint="#666666"/>
+                <TextView
+                    android:id="@+id/navi_tab_infra_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="인프라"
+                    android:textSize="13sp"
+                    android:textColor="#666666"
+                    android:textStyle="bold"/>
+            </LinearLayout>
+
+        </LinearLayout>
+    </HorizontalScrollView>
 
 </RelativeLayout>

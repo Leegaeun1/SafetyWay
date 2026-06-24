@@ -69,7 +69,16 @@ class FakeCallSettingActivity : AppCompatActivity() {
         loadSavedPrefs()
         refreshAudioUi()
         renderNumberList()
-
+        findViewById<Button>(R.id.btn_data_source_in_setting).setOnClickListener {
+            val dialogView = layoutInflater.inflate(R.layout.dialog_data_source, null)
+            val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+                .setView(dialogView)
+                .create()
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+            dialogView.findViewById<Button>(R.id.btn_dialog_confirms)
+                .setOnClickListener { dialog.dismiss() }
+            dialog.show()
+        }
         btnRecord.setOnClickListener      { onRecordClicked() }
         btnPlay.setOnClickListener        { onPlayClicked()   }
         btnDeleteAudio.setOnClickListener { onDeleteAudio()   }
