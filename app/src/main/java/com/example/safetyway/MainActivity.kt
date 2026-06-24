@@ -3,6 +3,7 @@ package com.example.safetyway
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.location.Location
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -33,11 +34,20 @@ import com.naver.maps.map.util.FusedLocationSource
 import com.naver.maps.map.util.MarkerIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.coroutines.resume
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var locationSource: FusedLocationSource
@@ -86,6 +96,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         val isDetour: Boolean = false,
         var label: String = "" //️ 라벨을 자체적으로 기억하도록 변수 추가!
     )
+    private val client = OkHttpClient()
+    val serverIp = BuildConfig.MY_IP_KEY
+    private val FLASK_SERVER_URL = "http://$serverIp/get_safe_waypoint"
     // assets 폴더의 a.csv를 읽어서 Room DB에 넣는 함수
     private fun loadPoliceDataOnce() {
         val prefs = getSharedPreferences("safety_prefs", MODE_PRIVATE)
@@ -469,184 +482,136 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
     // 경로 탐색
     private fun findRoutes() { // 경로 탐색
-        val goal = goalLatLng ?: return
-        val start = startLatLng ?: lastKnownLocation ?: naverMap.locationOverlay.position.takeIf { it.latitude != 0.0 }
+        val start = startLatLng ?: lastKnownLocation
+        val goal = goalLatLng
+        val loc = lastKnownLocation
 
-        if (start == null || start.latitude == 0.0) {
-            Toast.makeText(this, "현재 위치를 확인 중입니다", Toast.LENGTH_SHORT).show()
+        if (start == null || goal == null || loc == null) {
+            android.widget.Toast.makeText(this, "위치를 확인할 수 없습니다.", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
-        clearPolylines() // 기존 선 초기화
+
+        // 목적지까지의 직선 거리 계산
+        val straightDistM = FloatArray(1).apply {
+            Location.distanceBetween(start.latitude, start.longitude, goal.latitude, goal.longitude, this)
+        }[0].toDouble()
+        val offset = 0.001 // 점수 부여용 반경
 
         lifecycleScope.launch {
+            var detourRoute: RouteResult? = null // 우회 경로 결과
+            val baseResults = mutableListOf<RouteResult>() // 기본 경로
+
             try {
-                val offset = 50.0 / 111000.0 // 50m 반경 오차 범위
-
-                var detourRoute: RouteResult? = null // 우회 경로 결과
-                val baseResults = mutableListOf<RouteResult>() // 기본 경로 
-
-                // 출발지와 목적지 사이의 직선거리를 미터 단위로 계산
-                val straightDistM = distanceBetween(start.latitude, start.longitude, goal.latitude, goal.longitude)
-
-                // findRoutes() 내부의 우회 경로 생성 로직 업그레이드 버전
-                if (straightDistM > 200.0) {
-                    val midLat = (start.latitude + goal.latitude) / 2.0 // 출발지와 목적지 가운데
-                    val midLng = (start.longitude + goal.longitude) / 2.0
-
-                    // 원래 300m 고정이었던 반경을 전체 거리의 30% 수준으로 제한 (최대 300m)
-                    val dynamicSearchM = (straightDistM * 0.3).coerceAtMost(300.0)
-                    val searchOffset = dynamicSearchM / 111000.0 // 계산된 탐색 반경을 다시 위경도 좌표계 수치로 변환
-
-                    // 1. 주변 CCTV 데이터 조회
-                    val nearbySafetyHubs = withContext(Dispatchers.IO) {
-                        AppDatabase.getDatabase(applicationContext).safetyDao()
-                            .getSafetyInBounds(midLat - searchOffset, midLat + searchOffset, midLng - searchOffset, midLng + searchOffset, "CCTV")
-                    }
-
-                    // 2. 발견된 안전지점들을 최대 5개씩 쪼개기 (예: 8개면 5개 / 3개로 분할)
-                    // TMAP 보행자 경유지 제한이 5개이므로, 링크 노드 역할을 고려해 4개씩 자르는 것이 안전.
-                    val chunks = nearbySafetyHubs.chunked(4)
-
-                    if (chunks.isNotEmpty()) {
-                        val combinedPath = mutableListOf<List<Double>>()
-                        var totalDistance = 0
-                        var totalDuration = 0
-
-                        lifecycleScope.launch(Dispatchers.IO) {
-                            try {
-                                // 뒤에 !!를 붙여서 명시적으로 LatLng 타입으로 만든다.
-                                var currentStart: LatLng = start!!
-
-                                for (i in chunks.indices) {
-                                    val currentChunk = chunks[i]
-
-                                    // 마지막 조각이면 최종 목적지, 아니면 해당 조각의 마지막 CCTV를 임시 목적지로 설정
-                                    val currentGoal = if (i == chunks.size - 1) {
-                                        goal
-                                    } else {
-                                        val lastHub = currentChunk.last()
-                                        LatLng(lastHub.latitude, lastHub.longitude)
-                                    }
-
-                                    // 경유지 세팅
-                                    val passWaypoints = if (i == chunks.size - 1) currentChunk else currentChunk.dropLast(1)
-                                    val passListStr = if (passWaypoints.isNotEmpty()) {
-                                        passWaypoints.joinToString("_") { "${it.longitude},${it.latitude}" }
-                                    } else null
-
-                                    // TMAP API 호출
-                                    val response = safeRouteManager.fetchTmapPedestrianRoute(
-                                        this@MainActivity, currentStart, currentGoal, "0", passListStr
-                                    )
-
-                                    if (response != null && response.path.isNotEmpty()) {
-                                        // 중복 좌표 제거하면서 경로 이어붙이기
-                                        if (combinedPath.isEmpty()) {
-                                            combinedPath.addAll(response.path)
-                                        } else {
-                                            combinedPath.addAll(response.path.drop(1))
-                                        }
-
-                                        totalDistance += response.distanceM
-                                        totalDuration += response.durationSec
-                                    }
-
-                                    // 다음 루프를 위해 출발지점을 현재의 임시 목적지점으로 교체!
-                                    currentStart = currentGoal
-                                }
-
-                                // 모든 경로 조각 병합 완료 후 처리
-                                if (combinedPath.isNotEmpty()) {
-                                    withContext(Dispatchers.Main) {
-                                        val fakeResponse = TmapRouteResponse(
-                                            path = combinedPath,
-                                            distanceM = totalDistance,
-                                            durationSec = totalDuration
-                                        )
-                                        detourRoute = calculateRouteScore(this@MainActivity, fakeResponse, offset, isDetour = true)
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        }
-                    }
-                }
-
-                // 기본 TMAP 탐색
-                val baseOptions = listOf("0", "10")
-                for (option in baseOptions) {
-                    val tmapResult = withContext(Dispatchers.IO) {
-                        safeRouteManager.fetchTmapPedestrianRoute(this@MainActivity, start, goal, option, null)
-                    }
-                    if (tmapResult != null && tmapResult.path.isNotEmpty()) {
-                        val baseRoute = calculateRouteScore(this@MainActivity, tmapResult, offset, isDetour = false)
-                        baseResults.add(baseRoute)
-                    }
-                }
-
-                if (baseResults.isEmpty() && detourRoute == null) {
-                    Toast.makeText(this@MainActivity, "도보 경로를 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-
-                val safest = baseResults.maxByOrNull { it.safetyScore }
-                val shortest = baseResults.minByOrNull { it.distanceM }
-                val distSorted  = baseResults.sortedBy { it.distanceM }
-                val scoreSorted = baseResults.sortedByDescending { it.safetyScore }
-                val balanced = baseResults.minByOrNull { r -> distSorted.indexOf(r) + scoreSorted.indexOf(r) }
-
-                // 거리 대비 비효율적인 우회로 쳐내기
-                val validDetour = if (detourRoute != null && safest != null && shortest != null) {
-                    val isLessSafe = detourRoute.safetyScore <= safest.safetyScore
-                    // 최단 거리보다 1.5배 이상 멀면 아무리 안전해도 기각 (예: 100m -> 150m까지만 허용)
-                    val isTooFar = detourRoute.distanceM > shortest.distanceM * 1.5
-
-                    if (isLessSafe || isTooFar) null else detourRoute
-                } else {
-                    detourRoute
-                }
-
-                // .copy()를 사용해 서로의 이름표가 꼬이지 않게 독립적인 객체로 묶어줌
-                val candidates = listOfNotNull(
-                    validDetour?.copy(label = "🛡 안전 우회 경로"),
-                    safest?.copy(label = "🛡 안전 추천"),
-                    balanced?.copy(label = "⚖ 안전+거리"),
-                    shortest?.copy(label = "⚡ 최단 거리")
+                // 1. 파이썬 서버에서 안전 경유지 '리스트 전체'를 받아옴
+                val aiWaypoints = getAiWaypointsFromServer(
+                    start.latitude, start.longitude, goal.latitude, goal.longitude
                 )
 
-                // 기하학적으로 완전히 겹치는 경로의 라벨 진화 로직
-                val uniqueRoutes = mutableMapOf<List<List<Double>>, RouteResult>()
+                // 2. 5개씩 쪼개서 길을 그리고 하나로 합침
+                if (aiWaypoints != null && aiWaypoints.isNotEmpty()) {
+                    val aiResponse = fetchChunkedAiRoute(start, goal, aiWaypoints)
 
-                for (route in candidates) {
-                    val existing = uniqueRoutes[route.path]
-                    if (existing == null) {
-                        uniqueRoutes[route.path] = route
-                    } else {
-                        // 중복 경로인데, 하나는 제일 안전하고 하나는 제일 짧았다면 라벨을 합침
-                        if (existing.label == "🛡 안전 추천" && route.label == "⚡ 최단 거리") {
-                            existing.label = "🛡 최적 경로 (안전+최단)"
-                        }
+                    if (aiResponse != null) {
+                        detourRoute = calculateRouteScore(this@MainActivity, aiResponse, offset, isDetour = true)
+                        detourRoute?.label = "🛡 안전 추천"
                     }
                 }
-
-                // 점수가 가장 높은 순서대로 최대 3개까지만 자르기
-                val results = uniqueRoutes.values.toList().sortedByDescending { it.safetyScore }.take(3)
-
-                // 지도에 선 그리기
-                results.forEachIndexed { i, route ->
-                    drawPolyline(
-                        path  = route.path,
-                        color = if (i == 0) ROUTE_COLORS[0] else ROUTE_GRAY,
-                        width = if (i == 0) 15 else 8
-                    )
-                }
-
-                // 하단 결과 카드 UI 업데이트
-                showRouteCards(results)
-
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+
+            // 3. TMAP 기본 경로 호출 (추천, 최단, 편안한 길)
+            for (option in listOf("10", "0", "4")) {
+                val tmapResult = safeRouteManager.fetchTmapPedestrianRoute(this@MainActivity, start, goal, option, null)
+                if (tmapResult != null) {
+                    val baseRoute = calculateRouteScore(this@MainActivity, tmapResult, offset, isDetour = false)
+                    baseResults.add(baseRoute)
+                }
+            }
+
+            if (baseResults.isEmpty() && detourRoute == null) {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(this@MainActivity, "경로를 찾을 수 없습니다.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
+            // --- 경로 비교, 중복 제거 로직 ---
+            val candidates = mutableListOf<RouteResult>()
+            if (detourRoute != null) {
+                // detourRoute가 shortest보다 2배 이상 길면 버림
+                val shortestDist = baseResults.minOfOrNull { it.distanceM } ?: Int.MAX_VALUE
+                if (detourRoute.distanceM <= shortestDist * 2.0) {
+                    candidates.add(detourRoute)
+                }
+            }
+            candidates.addAll(baseResults)
+
+            // 2. 중복 제거 (경로 좌표 리스트를 Key로 사용)
+            val uniqueRoutes = mutableMapOf<List<List<Double>>, RouteResult>()
+            for (route in candidates) {
+                val existing = uniqueRoutes[route.path]
+                if (existing == null || route.safetyScore > existing.safetyScore) {
+                    uniqueRoutes[route.path] = route
+                }
+            }
+            val allUnique = uniqueRoutes.values.toList()
+
+            // 💡 3. 명확한 목적에 따른 3가지 경로 추출 (로직 초강화 버전)
+            val safest = allUnique.maxByOrNull { it.safetyScore }
+            val shortest = allUnique.minByOrNull { it.distanceM }
+
+            // 🔥 핵심: balanced(안전+최단)는 반드시 '안전추천'보다는 짧고, '최단거리'보다는 안전해야 함!
+            val balanced = allUnique.filter {
+                it != safest && it != shortest &&
+                        (safest == null || it.distanceM < safest.distanceM) && // 안전 추천보단 무조건 짧을 것!
+                        (shortest == null || it.safetyScore > shortest.safetyScore) // 최단 거리보단 무조건 안전할 것!
+            }.maxByOrNull { it.safetyScore }
+
+            val finalResults = mutableListOf<RouteResult>()
+
+            // 1순위 카드: 안전 추천
+            if (safest != null) {
+                safest.label = "🛡 안전 추천"
+                finalResults.add(safest)
+            }
+
+            // 2순위 카드: 안전+최단 (조건에 맞는 놈이 없으면 아예 안 띄웁니다!)
+            if (balanced != null) {
+                balanced.label = "⚖️ 안전+최단"
+                finalResults.add(balanced)
+            }
+
+            // 3순위 카드: 최단 거리
+            if (shortest != null && shortest != safest && shortest != balanced) {
+                shortest.label = "⚡ 최단 거리"
+                finalResults.add(shortest)
+            }
+
+            val results = finalResults.take(3)
+
+            withContext(Dispatchers.Main) {
+                polylines.forEach { it.map = null }
+                polylines.clear()
+
+                results.forEachIndexed { i, route ->
+                    val polyline = com.naver.maps.map.overlay.PolylineOverlay().apply {
+                        coords = route.path.map { LatLng(it[1], it[0]) }
+                        color = if (i == 0) ROUTE_COLORS[0] else ROUTE_GRAY
+                        width = if (i == 0) 15 else 10
+                        map = naverMap
+                        zIndex = if (i == 0) 100 else 50
+                    }
+                    polylines.add(polyline)
+                }
+                showRouteCards(results)
+
+                if (results.isNotEmpty()) {
+                    val firstRoute = results[0].path
+                    val bounds = com.naver.maps.geometry.LatLngBounds.Builder()
+                    firstRoute.forEach { bounds.include(LatLng(it[1], it[0])) }
+                    naverMap.moveCamera(com.naver.maps.map.CameraUpdate.fitBounds(bounds.build(), 150))
+                }
             }
         }
     }
@@ -1177,7 +1142,101 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
+    // 1. 파이썬 서버에서 안전 경유지 리스트(List) 전체를 받아오는 함수
+    private suspend fun getAiWaypointsFromServer(startLat: Double, startLng: Double, endLat: Double, endLng: Double): List<LatLng>? {
+        return suspendCancellableCoroutine { continuation ->
+            val url = "$FLASK_SERVER_URL?startLat=$startLat&startLng=$startLng&endLat=$endLat&endLng=$endLng"
+            val request = Request.Builder().url(url).build()
 
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isActive) continuation.resume(null)
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        val body = response.body?.string()
+                        if (body != null) {
+                            val json = JSONObject(body)
+                            if (json.getString("status") == "success") {
+                                val arr = json.getJSONArray("waypoints")
+                                val list = mutableListOf<LatLng>()
+                                for (i in 0 until arr.length()) {
+                                    val obj = arr.getJSONObject(i)
+                                    list.add(LatLng(obj.getDouble("lat"), obj.getDouble("lng")))
+                                }
+                                if (continuation.isActive) continuation.resume(list)
+                                return
+                            }
+                        }
+                    } catch (e: Exception) { e.printStackTrace() }
+                    if (continuation.isActive) continuation.resume(null)
+                }
+            })
+        }
+    }
+
+    // 🔥 2. (핵심 기술) 경유지가 5개를 넘으면 경로를 쪼개서 통신하고 이어붙이는 함수!
+    private suspend fun fetchChunkedAiRoute(start: LatLng, goal: LatLng, waypoints: List<LatLng>): TmapRouteResponse? {
+        if (waypoints.isEmpty()) {
+            return safeRouteManager.fetchTmapPedestrianRoute(this@MainActivity, start, goal, "30", null)
+        }
+
+        val chunks = mutableListOf<TmapRouteResponse>()
+        var currentStart = start
+        var idx = 0
+
+        // 5개씩 쪼개서 TMAP 통신
+        while (idx <= waypoints.size) {
+            val remainingWps = waypoints.size - idx
+
+            // 이전 청크가 마지막 경유지에서 끝났다면, 마지막 경유지 -> 최종 목적지 경로 1번 더 호출
+            if (remainingWps == 0) {
+                val response = safeRouteManager.fetchTmapPedestrianRoute(this@MainActivity, currentStart, goal, "30", null)
+                if (response != null) chunks.add(response) else return null
+                break
+            }
+
+            val takeCount = minOf(5, remainingWps)
+            val passWps = waypoints.subList(idx, idx + takeCount)
+
+            // 이번 청크의 목적지는 다음 경유지(takeCount 번째)이거나, 더 없으면 최종 목적지(goal)
+            val chunkGoal = if (idx + takeCount < waypoints.size) {
+                waypoints[idx + takeCount]
+            } else {
+                goal
+            }
+
+            val passListStr = passWps.joinToString("_") { "${it.longitude},${it.latitude}" }
+
+            val response = safeRouteManager.fetchTmapPedestrianRoute(this@MainActivity, currentStart, chunkGoal, "30", passListStr)
+            if (response != null) {
+                chunks.add(response)
+            } else {
+                return null // 통신 중 하나라도 실패하면 전체 우회로 탐색 실패 처리
+            }
+
+            currentStart = chunkGoal
+            idx += takeCount + 1 // 목표지점으로 사용한 경유지는 passList에서 제외하기 위해 +1
+        }
+
+        // 🔥 쪼개진 경로들(Chunks)을 하나의 완벽한 경로로 바느질(Merge)
+        val mergedPath = mutableListOf<List<Double>>()
+        var totalDist = 0
+        var totalTime = 0
+
+        chunks.forEach { chunk ->
+            if (mergedPath.isNotEmpty() && chunk.path.isNotEmpty()) {
+                // 이음새 부분이 겹치지 않도록 첫 번째 좌표는 빼고 붙임
+                mergedPath.addAll(chunk.path.drop(1))
+            } else {
+                mergedPath.addAll(chunk.path)
+            }
+            totalDist += chunk.distanceM
+            totalTime += chunk.durationSec
+        }
+
+        return TmapRouteResponse(mergedPath, totalDist, totalTime)
+    }
     companion object { // 위치 권한 요청
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1000
     }

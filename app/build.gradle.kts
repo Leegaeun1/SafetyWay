@@ -32,6 +32,7 @@ android {
         buildConfigField("String", "NAVER_MAP_CLIENT_ID", "\"${properties.getProperty("NAVER_MAP_CLIENT_ID", "").toString().trim()}\"")
         buildConfigField("String", "NAVER_MAP_CLIENT_SECRET", "\"${properties.getProperty("NAVER_MAP_CLIENT_SECRET", "").toString().trim()}\"")
         buildConfigField("String", "TMAP_APP_KEY", "\"${properties.getProperty("TMAP_APP_KEY", "").toString().trim()}\"")
+        buildConfigField("String", "MY_IP_KEY", "\"${properties.getProperty("MY_IP_KEY", "").toString().trim()}\"")
 
 // 매니페스트로 넘기는 값에도 trim() 추가!
         manifestPlaceholders["NAVER_MAP_CLIENT_ID"] = properties.getProperty("NAVER_MAP_CLIENT_ID", "").toString().trim()
@@ -111,4 +112,6 @@ dependencies {
     implementation ("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth-ktx")
+
+    implementation("com.squareup.okhttp3:okhttp:4.11.0")
 }

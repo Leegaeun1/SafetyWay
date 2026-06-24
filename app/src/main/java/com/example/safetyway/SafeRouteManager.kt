@@ -138,7 +138,6 @@ class SafeRouteManager(
     private suspend fun calculatePathMetrics(path: List<List<Double>>): PathMetrics {
         if (path.size < 2) return PathMetrics(10, 0, 0)
 
-        // 경로 전체 bbox + 버퍼로 한 번에 안전시설 조회
         val degBuffer = (BUFFER_M + 30.0) / 111_000.0
         val lats = path.map { it[1] }
         val lngs = path.map { it[0] }
@@ -147,46 +146,53 @@ class SafeRouteManager(
             lngs.min() - degBuffer, lngs.max() + degBuffer
         )
 
-        // 시설이 전혀 없으면 10점
         if (allItems.isEmpty()) return PathMetrics(10, 0, 0)
 
         val samples = samplePath(path, SAMPLE_INTERVAL_M)
 
-        // 샘플 포인트별 가중합 + 위치별 감지 여부 추적 (중복 제거)
-        val cctvHit  = mutableSetOf<Int>()
+        // 각 시설별로 중복 제거를 위한 Set 생성
+        val cctvHit = mutableSetOf<Int>()
         val lightHit = mutableSetOf<Int>()
+        val storeHit = mutableSetOf<Int>()
+        val policeHit = mutableSetOf<Int>()
+        val fireHit = mutableSetOf<Int>()
 
         for ((sLat, sLng) in samples) {
             for (item in allItems) {
                 val d = distanceBetween(sLat, sLng, item.latitude, item.longitude)
                 if (d > BUFFER_M) continue
-                if (item.type == "CCTV") repeat(item.count.coerceAtMost(5)) { cctvHit.add(item.id) }
-                else lightHit.add(item.id)
+                when (item.type) {
+                    "CCTV" -> repeat(item.count.coerceAtMost(5)) { cctvHit.add(item.id) }
+                    "LIGHT" -> lightHit.add(item.id)
+                    "STORE" -> storeHit.add(item.id)
+                    "POLICE" -> policeHit.add(item.id)
+                    "FIRE" -> fireHit.add(item.id)
+                }
             }
         }
 
-        // 경로 총 길이(km) 계산
         var totalDistM = 0.0
         for (i in 0 until path.size - 1) {
-            totalDistM += distanceBetween(
-                path[i][1], path[i][0],
-                path[i + 1][1], path[i + 1][0]
-            )
+            totalDistM += distanceBetween(path[i][1], path[i][0], path[i + 1][1], path[i + 1][0])
         }
         val totalDistKm = (totalDistM / 1000.0).coerceAtLeast(0.01)
 
-        // km당 가중 밀도
-        val densityPerKm = (cctvHit.size * CCTV_WEIGHT + lightHit.size * LIGHT_WEIGHT) / totalDistKm
+        // 각 시설의 중요도에 따라 가중치를 곱해 밀도 계산
+        val weightedSum = (cctvHit.size * 1.5) +
+                (lightHit.size * 1.0) +
+                (storeHit.size * 1.2) +  // 편의점은 1.2점
+                (policeHit.size * 3.0) + // 경찰서는 3.0점
+                (fireHit.size * 2.0)     // 소방서는 2.0점
 
+        val densityPerKm = weightedSum / totalDistKm
 
-        // log 스케일 점수 곡선
-        // score = 10 + 90 * log(1 + density/k) / log(1 + 30/k)
-        // k=3: density=0->10, 1->33, 5->62, 15->85, 30->100
         val k = 3.0
         val score = (10.0 + 90.0 * ln(1.0 + densityPerKm / k) / ln(1.0 + 30.0 / k))
             .toInt().coerceIn(10, 100)
 
-        return PathMetrics(score, cctvHit.size, lightHit.size)
+        // 안전시설 총 카운트 반환
+        val totalSafetyCount = lightHit.size + storeHit.size + policeHit.size + fireHit.size
+        return PathMetrics(score, cctvHit.size, totalSafetyCount)
     }
 
     /** 경로를 일정 거리 간격으로 보간 샘플링 */
